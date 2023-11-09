@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/about_box.h"
+#include "material/material_lang.h"
 
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
@@ -28,11 +29,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 rpl::producer<TextWithEntities> Text1() {
-	return tr::lng_about_text1(
-		lt_api_link,
-		tr::lng_about_text1_api(
-		) | Ui::Text::ToLink("https://core.telegram.org/api"),
-		Ui::Text::WithEntities);
+	return rktre("mtg_about_text1", {
+		"tdesktop_link",
+		Ui::Text::Link(ktr("mtg_about_text1_tdesktop"), "https://desktop.telegram.org/")
+	});
 }
 
 rpl::producer<TextWithEntities> Text2() {
@@ -40,7 +40,7 @@ rpl::producer<TextWithEntities> Text2() {
 		lt_gpl_link,
 		rpl::single(Ui::Text::Link(
 			"GNU GPL",
-			"https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE")),
+			"https://github.com/kukuruzka165/materialgram/blob/master/LICENSE")),
 		lt_github_link,
 		rpl::single(Ui::Text::Link(
 			"GitHub",
@@ -49,10 +49,13 @@ rpl::producer<TextWithEntities> Text2() {
 }
 
 rpl::producer<TextWithEntities> Text3() {
-	return tr::lng_about_text3(
-		lt_faq_link,
-		tr::lng_about_text3_faq() | Ui::Text::ToLink(telegramFaqLink()),
-		Ui::Text::WithEntities);
+	return rktre("mtg_about_text3", {
+		"channel_link",
+		Ui::Text::Link(ktr("mtg_about_text3_channel"), "https://t.me/materialgram")
+	}, {
+		"faq_link",
+		Ui::Text::Link(tr::lng_about_text3_faq(tr::now), telegramFaqLink())
+	});
 }
 
 } // namespace

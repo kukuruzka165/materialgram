@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "platform/platform_specific.h"
+#include "material/material_lang.h"
 
 #include <QtWidgets/QApplication>
 
@@ -72,7 +73,7 @@ void Tray::rebuildMenu() {
 			_activeForTrayIconAction = Core::App().isActiveForTrayMenu();
 			return _activeForTrayIconAction
 				? tr::lng_minimize_to_tray(tr::now)
-				: tr::lng_open_from_tray(tr::now);
+				: ktr("mtg_open_from_tray");
 		});
 
 		_tray.addAction(
@@ -93,7 +94,7 @@ void Tray::rebuildMenu() {
 			[=] { toggleSoundNotifications(); });
 	}
 
-	_tray.addAction(tr::lng_quit_from_tray(), [] { Core::Quit(); });
+	_tray.addAction(rktr("rtg_quit_from_tray"), [] { Core::Quit(); });
 
 	updateMenuText();
 }
