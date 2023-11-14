@@ -259,6 +259,9 @@ void Widget::createLanguageLink() {
 		_changeLanguage->hide(anim::type::instant);
 		_changeLanguage->entity()->setClickedCallback([=] {
 			Lang::CurrentCloudManager().switchToLanguage(languageId);
+			RabbitLang::Lang::Load(
+				Lang::GetInstance().baseId(), 
+				Lang::GetInstance().id());
 		});
 		_changeLanguage->toggle(
 			!_resetAccount && !_terms && _nextShown,

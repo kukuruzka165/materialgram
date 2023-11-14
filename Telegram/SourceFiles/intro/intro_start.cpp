@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "intro/intro_start.h"
+#include "material/material_lang.h"
 
 #include "lang/lang_keys.h"
 #include "intro/intro_qr.h"
@@ -28,7 +29,7 @@ StartWidget::StartWidget(
 	Window::Theme::KeepApplied();
 	setMouseTracking(true);
 	setTitleText(rpl::single(u"materialgram"_q));
-	setDescriptionText(tr::materialgram_intro_about());
+	setDescriptionText(rktr("mtg_intro_about"));
 	show();
 }
 

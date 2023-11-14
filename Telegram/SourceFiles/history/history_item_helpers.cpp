@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_item_helpers.h"
+#include "material/material_lang.h"
 
 #include "api/api_text_entities.h"
 #include "calls/calls_instance.h"
@@ -717,7 +718,7 @@ void CheckReactionNotificationSchedule(
 [[nodiscard]] TextWithEntities UnsupportedMessageText() {
 	const auto siteLink = u"https://github.com/kukuruzka165/materialgram/releases"_q;
 	auto result = TextWithEntities{
-		tr::lng_message_unsupported(tr::now, lt_link, siteLink)
+		ktr("rtg_message_unsupported", { "link", siteLink })
 	};
 	TextUtilities::ParseEntities(result, Ui::ItemTextNoMonoOptions().flags);
 	result.entities.push_front(
