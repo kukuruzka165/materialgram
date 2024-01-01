@@ -23,19 +23,22 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 - Included own Material You theme with colorizer ([Day](https://t.me/addtheme/materialgram_day), [Dark](https://t.me/addtheme/materialgram_dark))
 - **Google Sans** font everywhere (except for Arabic characters, they use the **Vazir** font)
 - Material icons instead of default ones
-- Added the ability to seek round videos
+- Added the ability to seek round videos (experimental)
+- Added the ability to delete more than 100 messages at once (experimental)
 - Added admin menu and chat log buttons above the members list
 - Removed message bubble tails and reverted old paddings
 - Replaced all sounds
 - Reduced image compression
 - Reduced minimum window size
-- Reduced timeouts
+- Reduced minimum brush thickness in the photo editor
+- Reduced use of uppercase in the interface
+- Reduced some timeouts
 - Increased upload speed
 - Improved spoiler animation
-- Use sentence case for buttons
-- Improved sticker pack menu. Button layout like on mobile and ability to copy the author's id
+- Improved sticker pack menu. "Share stickers" button replaced with "Remove" + show the amount of stickers near "Add stickers" + ability to copy the author's id
 - Improved chat export. 10000 messages in one html document and faster file download
 - Show the approximate date of account creation in the profile
+- If you would like to see a new feature in this list, please tell me in the [chat](https://t.me/materialgram_chat)
 
 ## Build instructions
 * [Windows 64-bit][win64]
