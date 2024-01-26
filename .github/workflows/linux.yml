@@ -1,105 +1,50 @@
-name: Linux.
+name: Linux
 
 on:
   push:
     tags:
       - '*'
-  workflow_dispatch:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/linux.yml'
-      - 'snap/**'
-      - 'Telegram/build/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.bat'
-      - 'Telegram/Telegram.plist'
 
 jobs:
-
-  linux:
-    name: Rocky Linux 8
+  build:
     runs-on: ubuntu-latest
-    
-    strategy:
-      matrix:
-        defines:
-          - ""
-
-    env:
-      UPLOAD_ARTIFACT: "true"
+    container:
+      image: omanshkrishn/materialgram:latest
 
     steps:
-      - name: Get repository name.
-        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+      - name: Update System
+        run: pacman -Syu --noconfirm
 
-      - name: Clone.
-        uses: actions/checkout@v3.1.0
+      - name: Set Tag Name
+        run: echo "TAGNAME=$(echo ${{ github.ref }} | cut -d '/' -f3)" >> $GITHUB_ENV 
+
+      - name: Build materialgram
+        run: |
+          [ -d "/home/builder" ] && cd /home/builder || { mkdir -p /home/builder && cd /home/builder; }
+          git clone https://github.com/kukuruzka165/materialgram --recursive -b ${{ env.TAGNAME }} && cd materialgram
+          cmake \
+           -B build \
+           -G Ninja \
+           -DCMAKE_INSTALL_PREFIX="/usr" \
+           -DCMAKE_BUILD_TYPE=Release \
+           -DTDESKTOP_API_ID=${{ secrets.API_ID }} \
+           -DTDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+           -DDESKTOP_APP_DISABLE_AUTOUPDATE=True \
+           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON 
+          ninja -C build -j$(nproc --all) 
+          mkdir fakeroot && DESTDIR=$(pwd)/fakeroot ninja -C build install && cd fakeroot 
+          tar -czvf materialgram-${{ env.TAGNAME }}.tar.gz usr  
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          submodules: recursive
-          path: ${{ env.REPO_NAME }}
+          name: materialgram-${{ env.TAGNAME }}
+          path: /home/builder/materialgram/fakeroot/materialgram-${{ env.TAGNAME }}.tar.gz
 
-      - name: First set up.
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
-          docker pull ghcr.io/telegramdesktop/tdesktop/centos_env
-          docker tag ghcr.io/telegramdesktop/tdesktop/centos_env tdesktop:centos_env
-
-      - name: materialgram build.
-        run: |
-          cd $REPO_NAME
-
-          DEFINE=""
-          if [ -n "${{ matrix.defines }}" ]; then
-            DEFINE="-D ${{ matrix.defines }}=ON"
-            echo Define from matrix: $DEFINE
-            echo "ARTIFACT_NAME=materialgram_${{ matrix.defines }}" >> $GITHUB_ENV
-          else
-            echo "ARTIFACT_NAME=materialgram" >> $GITHUB_ENV
-          fi
-
-          docker run --rm \
-          -v $PWD:/usr/src/tdesktop \
-          -e DEBUG=1 \
-          tdesktop:centos_env \
-          /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
-          -D CMAKE_EXE_LINKER_FLAGS="-s" \
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH}} \
-          -D DESKTOP_APP_DISABLE_AUTOUPDATE=True \
-          -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
-          $DEFINE
-          
-      - name: Check.
-        run: |
-          filePath="$REPO_NAME/out/Release/materialgram"
-          if test -f "$filePath"; then
-            echo "Build successfully done! :)"
-
-            size=$(stat -c %s "$filePath")
-            echo "File size of ${filePath}: ${size} Bytes."
-          else
-            echo "Build error, output file does not exist."
-            exit 1
-          fi
-
-      - name: Move artifact.
-        if: env.UPLOAD_ARTIFACT == 'true'
-        run: |
-          cd $REPO_NAME/out/Release
-          mkdir artifact
-          mv materialgram artifact/
-      - uses: actions/upload-artifact@master
-        if: env.UPLOAD_ARTIFACT == 'true'
-        name: Upload artifact.
+      - name: Upload artifact to Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/
+          name: ${{ env.TAGNAME }}
+          token: ${{ secrets.PAT }}
+          files: /home/builder/materialgram/fakeroot/materialgram-${{ env.TAGNAME }}.tar.gz
