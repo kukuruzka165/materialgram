@@ -48,3 +48,17 @@ jobs:
           name: ${{ env.TAGNAME }}
           token: ${{ secrets.PAT }}
           files: /home/builder/materialgram/fakeroot/materialgram-${{ env.TAGNAME }}.tar.gz
+
+  trigger-workflow:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+
+      - name: Trigger repository dispatch event
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.OKsPAT }}
+          repository: materialgram/arch
+          event-type: new-release
+          client-payload: '{"tagname": "${{ env.TAGNAME }}"}'
+
