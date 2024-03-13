@@ -53,6 +53,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      
+      - name: Set Tag Name
+        run: echo "TAGNAME=$(echo ${{ github.ref }} | cut -d '/' -f3)" >> $GITHUB_ENV 
 
       - name: Trigger repository dispatch event
         uses: peter-evans/repository-dispatch@v3
