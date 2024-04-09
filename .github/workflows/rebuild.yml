@@ -1,9 +1,16 @@
-name: Linux
+name: Rebuild
 
 on:
-  push:
-    tags:
-      - '*'
+  workflow_dispatch:
+    inputs:
+      tagname:
+        description: tag name (with 'v', v4.6.9.0)
+        type: string
+        required: true
+      pkgrel:
+        description: pkgrel (integer)
+        type: number
+        required: true
 
 jobs:
   build:
@@ -15,13 +22,10 @@ jobs:
       - name: Update System
         run: pacman -Syu --noconfirm
 
-      - name: Set Tag Name
-        run: echo "TAGNAME=$(echo ${{ github.ref }} | cut -d '/' -f3)" >> $GITHUB_ENV 
-
       - name: Build materialgram
         run: |
           [ -d "/home/builder" ] && cd /home/builder || { mkdir -p /home/builder && cd /home/builder; }
-          git clone https://github.com/kukuruzka165/materialgram --recursive -b ${{ env.TAGNAME }} && cd materialgram
+          git clone https://github.com/kukuruzka165/materialgram --recursive -b ${{ github.event.inputs.tagname }} && cd materialgram
           cmake \
            -B build \
            -G Ninja \
@@ -33,35 +37,30 @@ jobs:
            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON 
           ninja -C build -j$(nproc --all) 
           mkdir fakeroot && DESTDIR=$(pwd)/fakeroot ninja -C build install && cd fakeroot 
-          tar -czvf materialgram-${{ env.TAGNAME }}.tar.gz usr  
+          tar -czvf materialgram-${{ github.event.inputs.tagname }}.tar.gz usr  
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: materialgram-${{ env.TAGNAME }}
-          path: /home/builder/materialgram/fakeroot/materialgram-${{ env.TAGNAME }}.tar.gz
+          name: materialgram-${{ github.event.inputs.tagname }}
+          path: /home/builder/materialgram/fakeroot/materialgram-${{ github.event.inputs.tagname }}.tar.gz
 
       - name: Upload artifact to Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: ${{ env.TAGNAME }}
+          name: ${{ github.event.inputs.tagname }}
           token: ${{ secrets.PAT }}
-          files: /home/builder/materialgram/fakeroot/materialgram-${{ env.TAGNAME }}.tar.gz
+          files: /home/builder/materialgram/fakeroot/materialgram-${{ github.event.inputs.tagname }}.tar.gz
 
   trigger-workflow:
     runs-on: ubuntu-latest
     needs: build
-    steps:
-      
-      - name: Set Tag Name
-        run: echo "TAGNAME=$(echo ${{ github.ref }} | cut -d '/' -f3)" >> $GITHUB_ENV 
+    steps: 
 
       - name: Trigger repository dispatch event
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.OKsPAT }}
-          repository: materialgram/arch
-          event-type: new-release
-          client-payload: '{"tagname": "${{ env.TAGNAME }}", "pkgrel": "1"}'
-
+          repository: materialgram/materialgram-bin
+          event-type: rebuild
+          client-payload: '{"tagname": "${{ github.event.inputs.tagname }}", "pkgrel": "${{ github.event.inputs.pkgrel }}"}'
