@@ -50,6 +50,7 @@ jobs:
         with:
           name: ${{ github.event.inputs.tagname }}
           token: ${{ secrets.PAT }}
+          tag_name: ${{ github.event.inputs.tagname }}
           files: /home/builder/materialgram/fakeroot/materialgram-${{ github.event.inputs.tagname }}.tar.gz
 
   trigger-workflow:
