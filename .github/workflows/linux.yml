@@ -61,7 +61,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.OKsPAT }}
-          repository: materialgram/arch
+          repository: materialgram/materialgram-bin
           event-type: new-release
           client-payload: '{"tagname": "${{ env.TAGNAME }}", "pkgrel": "1"}'
 
