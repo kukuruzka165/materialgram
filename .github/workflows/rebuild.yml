@@ -46,7 +46,7 @@ jobs:
           path: /home/builder/materialgram/fakeroot/materialgram-${{ github.event.inputs.tagname }}.tar.gz
 
       - name: Upload artifact to Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.event.inputs.tagname }}
           token: ${{ secrets.PAT }}
