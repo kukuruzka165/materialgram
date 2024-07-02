@@ -4,58 +4,96 @@ on:
   push:
     tags:
       - '*'
+  workflow_dispatch:
+    inputs:
+      pkgrel:
+        description: pkgrel
+        type: number
+        required: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: omanshkrishn/materialgram:latest
 
     steps:
-      - name: Update System
-        run: pacman -Syu --noconfirm
+
+      - name: Pull docker image
+        run: |
+          docker pull ghcr.io/telegramdesktop/tdesktop/centos_env
+          docker tag ghcr.io/telegramdesktop/tdesktop/centos_env materialgram:build
+
+      - name: Set repository name
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
 
       - name: Set Tag Name
-        run: echo "TAGNAME=$(echo ${{ github.ref }} | cut -d '/' -f3)" >> $GITHUB_ENV 
+        run: |
+          cd $REPO_NAME
+          echo "TAGNAME=$(git describe --tags `git rev-list --tags --max-count=1`))" >> $GITHUB_ENV
+          echo "::set-output name=TAGNAME::$TAGNAME"
 
       - name: Build materialgram
         run: |
-          [ -d "/home/builder" ] && cd /home/builder || { mkdir -p /home/builder && cd /home/builder; }
-          git clone https://github.com/kukuruzka165/materialgram --recursive -b ${{ env.TAGNAME }} && cd materialgram
-          cmake \
-           -B build \
-           -G Ninja \
-           -DCMAKE_INSTALL_PREFIX="/usr" \
-           -DCMAKE_BUILD_TYPE=Release \
-           -DTDESKTOP_API_ID=${{ secrets.API_ID }} \
-           -DTDESKTOP_API_HASH=${{ secrets.API_HASH }} \
-           -DDESKTOP_APP_DISABLE_AUTOUPDATE=True \
-           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON 
-          ninja -C build -j$(nproc --all) 
-          mkdir fakeroot && DESTDIR=$(pwd)/fakeroot ninja -C build install && cd fakeroot 
-          tar -czvf materialgram-${{ env.TAGNAME }}.tar.gz usr  
+          cd $REPO_NAME
+
+          DEFINE=""
+          if [ -n "${{ matrix.defines }}" ]; then
+            DEFINE="-D ${{ matrix.defines }}=ON"
+            echo Define from matrix: $DEFINE
+            echo "ARTIFACT_NAME=materialgram_${{ matrix.defines }}" >> $GITHUB_ENV
+          else
+            echo "ARTIFACT_NAME=materialgram" >> $GITHUB_ENV
+          fi
+
+          docker run --rm \
+          -v $PWD:/usr/src/tdesktop \
+          -e CONFIG=Release \
+          materialgram:build \
+          /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+          -D CMAKE_EXE_LINKER_FLAGS="-s" \
+          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
+          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+          -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+          $DEFINE
+
+      - name: Create Tar
+        run: |
+          cd $REPO_NAME/arch
+          bash setup.sh
+          tar -czvf materialgram-${{ env.TAGNAME }}.tar.gz usr
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: materialgram-${{ env.TAGNAME }}
-          path: /home/builder/materialgram/fakeroot/materialgram-${{ env.TAGNAME }}.tar.gz
+          path: ${{ env.REPO_NAME }}/arch/materialgram-${{ env.TAGNAME }}.tar.gz
 
       - name: Upload artifact to Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: ${{ env.TAGNAME }}
+          tag_name: ${{ env.TAGNAME }}
           token: ${{ secrets.PAT }}
-          files: /home/builder/materialgram/fakeroot/materialgram-${{ env.TAGNAME }}.tar.gz
+          files: ${{ env.REPO_NAME }}/arch/materialgram-${{ env.TAGNAME }}.tar.gz
 
   trigger-workflow:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      
-      - name: Set Tag Name
-        run: echo "TAGNAME=$(echo ${{ github.ref }} | cut -d '/' -f3)" >> $GITHUB_ENV 
+     
+      - name: Set PKGREL
+        run: |
+          if [ "${{ github.event_name }}" == 'workflow_dispatch' ]; then
+            PKGREL="${{ github.event.inputs.pkgrel }}"
+          else
+            PKGREL="1"
+          fi
+          echo "PKGREL=$PKGREL" >> $GITHUB_ENV
 
       - name: Trigger repository dispatch event
         uses: peter-evans/repository-dispatch@v3
@@ -63,5 +101,5 @@ jobs:
           token: ${{ secrets.OKsPAT }}
           repository: materialgram/materialgram-bin
           event-type: new-release
-          client-payload: '{"tagname": "${{ env.TAGNAME }}", "pkgrel": "1"}'
+          client-payload: '{"tagname": "${{ needs.build.outputs.TAGNAME }}", "pkgrel": "${{ env.PKGREL }}"}'
 
