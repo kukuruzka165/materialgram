@@ -22,20 +22,16 @@ jobs:
           docker pull ghcr.io/telegramdesktop/tdesktop/centos_env
           docker tag ghcr.io/telegramdesktop/tdesktop/centos_env materialgram:build
 
-      - name: Set repository name
-        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+      - name: Set Repository name & Tag name
+        run: |
+          echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+          echo "TAGNAME=$(curl -s "${{ github.api_url }}/repos/${{ github.repository }}/tags" | jq -r '.[0].name')" >> $GITHUB_ENV
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
           path: ${{ env.REPO_NAME }}
-
-      - name: Set Tag Name
-        run: |
-          cd $REPO_NAME
-          echo "TAGNAME=$(git describe --tags `git rev-list --tags --max-count=1`))" >> $GITHUB_ENV
-          echo "::set-output name=TAGNAME::$TAGNAME"
 
       - name: Build materialgram
         run: |
@@ -86,7 +82,7 @@ jobs:
     needs: build
     steps:
      
-      - name: Set PKGREL
+      - name: Set PKGREL & TAGNAME
         run: |
           if [ "${{ github.event_name }}" == 'workflow_dispatch' ]; then
             PKGREL="${{ github.event.inputs.pkgrel }}"
@@ -94,6 +90,7 @@ jobs:
             PKGREL="1"
           fi
           echo "PKGREL=$PKGREL" >> $GITHUB_ENV
+          echo "TAGNAME=$(curl -s "${{ github.api_url }}/repos/${{ github.repository }}/tags" | jq -r '.[0].name')" >> $GITHUB_ENV
 
       - name: Trigger repository dispatch event
         uses: peter-evans/repository-dispatch@v3
@@ -101,5 +98,5 @@ jobs:
           token: ${{ secrets.OKsPAT }}
           repository: materialgram/materialgram-bin
           event-type: new-release
-          client-payload: '{"tagname": "${{ needs.build.outputs.TAGNAME }}", "pkgrel": "${{ env.PKGREL }}"}'
+          client-payload: '{"tagname": "${{ env.TAGNAME }}", "pkgrel": "${{ env.PKGREL }}"}'
 
