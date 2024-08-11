@@ -19,3 +19,4 @@ cp ../out/Release/materialgram usr/bin/
 cp ../lib/xdg/io.github.kukuruzka165.materialgram.desktop usr/share/applications/
 cp ../lib/xdg/io.github.kukuruzka165.materialgram.metainfo.xml usr/share/metainfo/
 cp ../lib/xdg/io.github.kukuruzka165.materialgram.service usr/share/dbus-1/services/
+sed -i 's|Exec=@CMAKE_INSTALL_FULL_BINDIR@/materialgram|Exec=/usr/bin/materialgram|' usr/share/dbus-1/services/io.github.kukuruzka165.materialgram.service
