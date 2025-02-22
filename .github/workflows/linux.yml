@@ -47,6 +47,7 @@ jobs:
           fi
 
           docker run --rm \
+          -u $(id -u):$(id -g) \
           -v $PWD:/usr/src/tdesktop \
           -e CONFIG=Release \
           materialgram:build \
