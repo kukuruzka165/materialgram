@@ -6,70 +6,48 @@ on:
       - '*'
   workflow_dispatch:
     inputs:
+      tagname:
+        description: 'tagname'
+        type: string
+        required: true
       pkgrel:
         description: pkgrel
         type: number
         required: true
 
 jobs:
-  linux:
-    name: Rocky Linux 8
+  build:
     runs-on: ubuntu-latest
-
+    outputs:
+      tagname: ${{ steps.tagname.outputs.tagname }}
     env:
-      ONLY_CACHE: "false"
-      IMAGE_TAG: tdesktop:centos_env
+      IMAGE_TAG: materialgram:build
 
     steps:
+      - name: Set TAGNAME
+        id: tagname
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAGNAME="${{ github.event.inputs.tagname }}"
+          else
+            TAGNAME="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "TAGNAME=$TAGNAME" >> $GITHUB_ENV
+          echo "tagname=$TAGNAME" >> $GITHUB_OUTPUT
+
       - name: Clone.
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          ref: ${{ env.TAGNAME }}
 
-      - name: First set up.
+      - name: Pull Docker IMG
         run: |
-          sudo apt update
-          curl -sSL https://install.python-poetry.org | python3 -
-          cd Telegram/build/docker/centos_env
-          poetry install
-          DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
-          echo "$DOCKERFILE" > Dockerfile
-          echo "TAGNAME=$(curl -s "${{ github.api_url }}/repos/${{ github.repository }}/tags" | jq -r '.[0].name')" >> $GITHUB_ENV
+          docker pull ghcr.io/telegramdesktop/tdesktop/centos_env
+          docker tag ghcr.io/telegramdesktop/tdesktop/centos_env $IMAGE_TAG
 
-      - name: Free up some disk space.
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
-        with:
-          tool-cache: true
-
-      - name: Set up Docker Buildx.
-        uses: docker/setup-buildx-action@v3
-
-      - name: Libraries cache.
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/.buildx-cache
-          key: ${{ runner.OS }}-libs-${{ hashFiles('Telegram/build/docker/centos_env/**') }}
-          restore-keys: ${{ runner.OS }}-libs-
-
-      - name: Libraries.
-        uses: docker/build-push-action@v6
-        with:
-          context: Telegram/build/docker/centos_env
-          load: ${{ env.ONLY_CACHE == 'false' }}
-          tags: ${{ env.IMAGE_TAG }}
-          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
-          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
-
-      - name: Move cache.
+      - name: materialgram build
         run: |
-          rm -rf ${{ runner.temp }}/.buildx-cache
-          mv ${{ runner.temp }}/.buildx-cache{-new,}
-
-      - name: materialgram build.
-        if: env.ONLY_CACHE == 'false'
-        run: |
-          echo "ARTIFACT_NAME=materialgram" >> $GITHUB_ENV
-
           docker run --rm \
           -u $(id -u) \
           -v $PWD:/usr/src/tdesktop \
@@ -101,7 +79,7 @@ jobs:
 
   trigger-workflow:
     runs-on: ubuntu-latest
-    needs: linux
+    needs: build
     steps:
      
       - name: Set PKGREL & TAGNAME
@@ -112,7 +90,7 @@ jobs:
             PKGREL="1"
           fi
           echo "PKGREL=$PKGREL" >> $GITHUB_ENV
-          echo "TAGNAME=$(curl -s "${{ github.api_url }}/repos/${{ github.repository }}/tags" | jq -r '.[0].name')" >> $GITHUB_ENV
+          echo "TAGNAME=${{ needs.build.outputs.tagname }}" >> $GITHUB_ENV
 
       - name: Trigger repository dispatch event
         uses: peter-evans/repository-dispatch@v3
