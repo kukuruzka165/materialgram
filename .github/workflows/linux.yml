@@ -54,20 +54,20 @@ jobs:
           $IMAGE_TAG \
           /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
           -D CMAKE_CONFIGURATION_TYPES=Release \
+          -D CMAKE_INSTALL_PREFIX="/usr" \
           -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
           -D TDESKTOP_API_HASH=${{ secrets.API_HASH }}
 
       - name: Create Tar
         run: |
-          cd arch
-          bash setup.sh
+          cd out/install
           tar -czvf materialgram-${{ env.TAGNAME }}.tar.gz usr
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: materialgram-${{ env.TAGNAME }}
-          path: arch/materialgram-${{ env.TAGNAME }}.tar.gz
+          path: out/install/materialgram-${{ env.TAGNAME }}.tar.gz
 
       - name: Upload artifact to Release
         uses: softprops/action-gh-release@v2
@@ -75,7 +75,7 @@ jobs:
           name: ${{ env.TAGNAME }}
           tag_name: ${{ env.TAGNAME }}
           token: ${{ secrets.PAT }}
-          files: arch/materialgram-${{ env.TAGNAME }}.tar.gz
+          files: out/install/materialgram-${{ env.TAGNAME }}.tar.gz
 
   trigger-workflow:
     runs-on: ubuntu-latest
