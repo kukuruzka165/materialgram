@@ -9,5 +9,5 @@ popd > /dev/null
 
 cd $FullScriptPath/../docker/centos_env
 poetry install
-poetry run gen_dockerfile | DOCKER_BUILDKIT=1 docker build -t tdesktop:centos_env -
+poetry run gen_dockerfile | DOCKER_BUILDKIT=1 docker build -t materialgram:centos_env -
 cd $FullExecPath
