@@ -870,10 +870,10 @@ COPY --link --from=tde2e /usr/src/tde2e-cache /
 COPY --link --from=patches /usr/src/patches patches
 RUN patch -p1 -d /usr/lib64/gobject-introspection -i $PWD/patches/gobject-introspection.patch && rm -rf patches
 
-WORKDIR /usr/src/tdesktop
+WORKDIR /usr/src/materialgram
 ENV BOOST_INCLUDEDIR=/usr/include/boost1.78
 ENV BOOST_LIBRARYDIR=/usr/lib64/boost1.78
 
 USER user
-VOLUME [ "/usr/src/tdesktop" ]
-CMD [ "/usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh" ]
+VOLUME [ "/usr/src/materialgram" ]
+CMD [ "/usr/src/materialgram/Telegram/build/docker/centos_env/build.sh" ]
