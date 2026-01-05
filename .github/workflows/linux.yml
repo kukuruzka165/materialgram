@@ -61,13 +61,13 @@ jobs:
       - name: Create Tar
         run: |
           cd out/install
-          tar -czvf materialgram-${{ env.TAGNAME }}.tar.gz usr
+          tar -I 'zstd -T0 --ultra -22' -cvf materialgram-${{ env.TAGNAME }}.tar.zst usr
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: materialgram-${{ env.TAGNAME }}
-          path: out/install/materialgram-${{ env.TAGNAME }}.tar.gz
+          path: out/install/materialgram-${{ env.TAGNAME }}.tar.zst
 
       - name: Upload artifact to Release
         uses: softprops/action-gh-release@v2
@@ -75,7 +75,7 @@ jobs:
           name: ${{ env.TAGNAME }}
           tag_name: ${{ env.TAGNAME }}
           token: ${{ secrets.PAT }}
-          files: out/install/materialgram-${{ env.TAGNAME }}.tar.gz
+          files: out/install/materialgram-${{ env.TAGNAME }}.tar.zst
 
   trigger-workflow:
     runs-on: ubuntu-latest
