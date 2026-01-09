@@ -7042,7 +7042,7 @@ void OverlayWidget::updateHeader() {
 			   { QByteArray::fromHex("FFD8FFE000104A464946000101010078"), "Desktop Windows" },
 			   { QByteArray::fromHex("FFD8FFE000104A464946000101010060"), "Desktop Windows, 2" },
 			   { QByteArray::fromHex("FFD8FFE000104A46494600010101004800480000FFE201DB"), "Desktop Windows, 3" },
-			   { QByteArray::fromHex("FFD8FFE000104A46494600010101004800480000FFDB00"), "iOS, Desktop Linux, Generic" },
+			   { QByteArray::fromHex("FFD8FFE000104A46494600010101004800480000FFDB00"), "Desktop Linux, Unigram, Generic" },
 			   { QByteArray::fromHex("FFD8FFE000104A46494600010101004800480000FFE202284943435F50524F46494C450001010000021800000000"), "Android, old" },
 			   { QByteArray::fromHex("FFD8FFE000104A4649460001010101"), "Desktop macOS" },
 			   { QByteArray::fromHex("FFD8FFE000104A46494600010101009000900000FFE201DB"), "Desktop macOS, 2" },
@@ -7060,6 +7060,12 @@ void OverlayWidget::updateHeader() {
 					platform = header.second;
 					break;
 				}
+			}
+			const auto isPfp = !_message && !_document;
+			if (isPfp && _photo->hasVideo()) {
+				platform = QString();
+			} else if (isPfp && platform == u"Desktop Linux, Unigram, Generic"_q) {
+				platform = "iOS, Generic";
 			}
 			if (!platform.isEmpty()) {
 				_headerText += " (" + platform + ")";
