@@ -77,6 +77,10 @@ namespace InlineBots {
 class AttachWebView;
 } // namespace InlineBots
 
+namespace Plugins {
+class Bridge;
+} // namespace Plugins
+
 namespace Ui {
 struct ColorIndicesCompressed;
 } // namespace Ui
@@ -196,6 +200,9 @@ public:
 	}
 	[[nodiscard]] Data::Session &data() const {
 		return *_data;
+	}
+	[[nodiscard]] Plugins::Bridge &plugins() const {
+		return *_plugins;
 	}
 	[[nodiscard]] SessionSettings &settings() const {
 		return *_settings;
@@ -331,6 +338,9 @@ private:
 
 	const std::unique_ptr<Support::Helper> _supportHelper;
 	const std::unique_ptr<Support::FastButtonsBots> _fastButtonsBots;
+
+	// Depends on _data and _api; constructed last so both are ready.
+	const std::unique_ptr<Plugins::Bridge> _plugins;
 
 	std::shared_ptr<QImage> _selfUserpicView;
 	rpl::variable<bool> _premiumPossible = false;

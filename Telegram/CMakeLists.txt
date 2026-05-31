@@ -1300,6 +1300,9 @@ PRIVATE
     main/main_session_settings.h
     main/session/send_as_peers.cpp
     main/session/send_as_peers.h
+
+    plugins/plugins_bridge.cpp
+    plugins/plugins_bridge.h
     main/session/session_show.cpp
     main/session/session_show.h
     media/audio/media_audio.cpp

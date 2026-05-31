@@ -1,0 +1,9 @@
+from opengram_plugins import Plugin
+
+
+class BoomPlugin(Plugin):
+    name = "boom"
+    version = "0.0.1"
+
+    def on_message(self, message):
+        raise RuntimeError("boom on every message")
