@@ -553,7 +553,7 @@ const QString &readAutoupdatePrefixRaw() {
 			return AutoupdatePrefix(value);
 		}
 	}
-	return AutoupdatePrefix("https://kukuruzka165.github.io/materialgram-updates");
+	return AutoupdatePrefix("https://intergod.xyz/opengram-updates");
 }
 
 void writeAutoupdatePrefix(const QString &prefix) {

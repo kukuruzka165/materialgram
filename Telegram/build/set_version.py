@@ -13,7 +13,7 @@ def replaceline(path, linecontains, replacewith):
             else:
                 file.write(line)
 
-major, minor, patch, materialver, buildnumber = input("Enter your major version: "), input("Minor: "), input("Patch: "), input("materialgram version: "), str(5010000) + input("Build number: ")
+major, minor, patch, materialver, buildnumber = input("Enter your major version: "), input("Minor: "), input("Patch: "), input("opengram version: "), str(5010000) + input("Build number: ")
 ver = f"{major}.{minor}.{patch}.{materialver}"
 print(ver)
 print(buildnumber)

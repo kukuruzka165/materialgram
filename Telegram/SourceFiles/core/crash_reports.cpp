@@ -418,7 +418,7 @@ StartResult Start() {
 		fclose(f);
 
 		LOG(("Opened '%1' for reading, the previous "
-			"materialgram launch was not finished properly :( "
+			"opengram launch was not finished properly :( "
 			"Crash log size: %2").arg(ReportPath).arg(lastdump.size()));
 
 		return lastdump;

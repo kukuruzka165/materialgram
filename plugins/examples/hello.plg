@@ -1,0 +1,16 @@
+from opengram_plugins import Plugin
+
+
+class HelloPlugin(Plugin):
+    name = "hello"
+    version = "0.0.2"
+
+    def on_load(self):
+        self.host.log(f"{self.name} loaded")
+
+    def on_unload(self):
+        self.host.log(f"{self.name} unloaded")
+
+    def on_message(self, message):
+        if message.text == "ping":
+            self.host.send_message(message.chat, "pong")

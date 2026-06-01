@@ -1,6 +1,6 @@
 {
     "name": "CentOS",
-    "image": "materialgram:centos_env",
+    "image": "opengram:centos_env",
     "customizations": {
         "vscode": {
             "settings": {

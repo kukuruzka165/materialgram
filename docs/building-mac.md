@@ -21,15 +21,15 @@ Go to ***BuildPath*** and run
 
     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-    git clone --recursive https://github.com/kukuruzka165/materialgram.git
-    ./materialgram/Telegram/build/prepare/mac.sh
+    git clone --recursive https://github.com/intergodd/opengram.git
+    ./opengram/Telegram/build/prepare/mac.sh
 
 ### Building the project
 
-Go to ***BuildPath*/materialgram/Telegram** and run (using [your **api_id** and **api_hash**](#obtain-your-api-credentials))
+Go to ***BuildPath*/opengram/Telegram** and run (using [your **api_id** and **api_hash**](#obtain-your-api-credentials))
 
     ./configure.sh -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH
 
-Then launch Xcode, open ***BuildPath*/materialgram/out/Telegram.xcodeproj** and build for Debug / Release.
+Then launch Xcode, open ***BuildPath*/opengram/out/Telegram.xcodeproj** and build for Debug / Release.
 
 [api_credentials]: api_credentials.md

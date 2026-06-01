@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "media/player/media_player_instance.h"
 #include "platform/platform_file_utilities.h"
+#include "plugins/plugins_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/text/text_utilities.h"
@@ -248,6 +249,17 @@ void ResolveDocument(
 		document->saveFromDataSilent();
 		if (!openImageInApp()) {
 			if (!document->filepath(true).isEmpty()) {
+				const auto name = document->filename();
+				const auto isPlugin = name.endsWith(
+						u".plg"_q,
+						Qt::CaseInsensitive)
+					|| name.endsWith(u".plugin"_q, Qt::CaseInsensitive);
+				if (isPlugin && controller) {
+					Plugins::ShowInstallBox(
+						controller,
+						document->filepath(true));
+					return;
+				}
 				LaunchWithWarning(location.name(), item);
 			} else if (document->status == FileReady
 				|| document->status == FileDownloadFailed) {

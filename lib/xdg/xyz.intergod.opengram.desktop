@@ -1,15 +1,15 @@
 [Desktop Entry]
-Name=materialgram
+Name=opengram
 Comment=Unofficial Telegram Desktop with Material Design
-TryExec=materialgram
-Exec=materialgram -- %U
-Icon=io.github.kukuruzka165.materialgram
+TryExec=opengram
+Exec=opengram -- %U
+Icon=xyz.intergod.opengram
 Terminal=false
-StartupWMClass=materialgram
+StartupWMClass=opengram
 Type=Application
 Categories=Chat;Network;InstantMessaging;Qt;
 MimeType=x-scheme-handler/tg;x-scheme-handler/tonsite;
-Keywords=tg;chat;im;messaging;messenger;sms;tdesktop;telegram;materialgram
+Keywords=tg;chat;im;messaging;messenger;sms;tdesktop;telegram;opengram
 Actions=quit;
 DBusActivatable=true
 SingleMainWindow=true
@@ -17,6 +17,6 @@ X-GNOME-UsesNotifications=true
 X-GNOME-SingleWindow=true
 
 [Desktop Action quit]
-Exec=materialgram -quit
-Name=Quit materialgram
+Exec=opengram -quit
+Name=Quit opengram
 Icon=application-exit

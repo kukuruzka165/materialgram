@@ -1300,6 +1300,11 @@ PRIVATE
     main/main_session_settings.h
     main/session/send_as_peers.cpp
     main/session/send_as_peers.h
+
+    plugins/plugins_bridge.cpp
+    plugins/plugins_bridge.h
+    plugins/plugins_box.cpp
+    plugins/plugins_box.h
     main/session/session_show.cpp
     main/session/session_show.h
     media/audio/media_audio.cpp
@@ -1960,6 +1965,21 @@ if (APPLE AND NOT build_macstore)
     )
 endif()
 
+# Ship the Python plugin runtime (the opengram_plugins sidecar package and
+# example plugins) next to the executable so the in-app plugin bridge can seed
+# a fresh profile and run without any system Python setup.
+if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../plugins)
+    add_custom_command(TARGET Telegram POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/opengram_plugins
+            $<TARGET_FILE_DIR:Telegram>/plugins/opengram_plugins
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/examples
+            $<TARGET_FILE_DIR:Telegram>/plugins/examples
+        COMMENT "Bundling opengram plugin runtime"
+    )
+endif()
+
 if (WIN32)
     # message(${CMAKE_GENERATOR})
     # mt.exe -manifest "${res_loc}/winrc/Telegram.manifest" "-inputresource:\"$<TARGET_FILE:Telegram>\";#1" "-outputresource:\"$<TARGET_FILE:Telegram>\";#1" >NUL
@@ -2072,9 +2092,9 @@ else()
 endif()
 
 if (build_macstore)
-    set(bundle_identifier "io.github.kukuruzka165.materialgram")
-    set(bundle_entitlements "materialgram.entitlements")
-    set(output_name "materialgram")
+    set(bundle_identifier "xyz.intergod.opengram")
+    set(bundle_entitlements "opengram.entitlements")
+    set(output_name "opengram")
     target_link_options(Telegram
     PRIVATE
         -F${libs_loc}/breakpad/src/client/mac/build/Release
@@ -2090,12 +2110,12 @@ if (build_macstore)
     )
 else()
     if (CMAKE_GENERATOR STREQUAL Xcode)
-        set(bundle_identifier "io.github.kukuruzka165.materialgram$<$<CONFIG:Debug>:Debug>")
+        set(bundle_identifier "xyz.intergod.opengram$<$<CONFIG:Debug>:Debug>")
     else()
-        set(bundle_identifier "io.github.kukuruzka165.materialgram")
+        set(bundle_identifier "xyz.intergod.opengram")
     endif()
     set(bundle_entitlements "Telegram.entitlements")
-    set(output_name "materialgram")
+    set(output_name "opengram")
 endif()
 
 if (CMAKE_GENERATOR STREQUAL Xcode)
@@ -2141,7 +2161,7 @@ get_property(is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if (APPLE
     OR is_multi_config
     OR NOT CMAKE_EXECUTABLE_SUFFIX STREQUAL ""
-    OR NOT "${output_name}" STREQUAL "materialgram")
+    OR NOT "${output_name}" STREQUAL "opengram")
     set(output_folder ${CMAKE_BINARY_DIR})
 else()
     set(output_folder ${CMAKE_BINARY_DIR}/bin)
@@ -2315,21 +2335,21 @@ endif()
 
 if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     include(GNUInstallDirs)
-    configure_file("../lib/xdg/io.github.kukuruzka165.materialgram.service" "${CMAKE_CURRENT_BINARY_DIR}/io.github.kukuruzka165.materialgram.service" @ONLY)
-    configure_file("../lib/xdg/io.github.kukuruzka165.materialgram.metainfo.xml" "${CMAKE_CURRENT_BINARY_DIR}/io.github.kukuruzka165.materialgram.metainfo.xml" @ONLY)
-    generate_appstream_changelog(Telegram "${CMAKE_SOURCE_DIR}/changelog.txt" "${CMAKE_CURRENT_BINARY_DIR}/io.github.kukuruzka165.materialgram.metainfo.xml")
+    configure_file("../lib/xdg/xyz.intergod.opengram.service" "${CMAKE_CURRENT_BINARY_DIR}/xyz.intergod.opengram.service" @ONLY)
+    configure_file("../lib/xdg/xyz.intergod.opengram.metainfo.xml" "${CMAKE_CURRENT_BINARY_DIR}/xyz.intergod.opengram.metainfo.xml" @ONLY)
+    generate_appstream_changelog(Telegram "${CMAKE_SOURCE_DIR}/changelog.txt" "${CMAKE_CURRENT_BINARY_DIR}/xyz.intergod.opengram.metainfo.xml")
     install(TARGETS Telegram RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    install(FILES "Resources/art/icon16.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps" RENAME "io.github.kukuruzka165.materialgram.png")
-    install(FILES "Resources/art/icon32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "io.github.kukuruzka165.materialgram.png")
-    install(FILES "Resources/art/icon48.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48/apps" RENAME "io.github.kukuruzka165.materialgram.png")
-    install(FILES "Resources/art/icon64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "io.github.kukuruzka165.materialgram.png")
-    install(FILES "Resources/art/icon128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "io.github.kukuruzka165.materialgram.png")
-    install(FILES "Resources/art/icon256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "io.github.kukuruzka165.materialgram.png")
-    install(FILES "Resources/art/icon512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "io.github.kukuruzka165.materialgram.png")
-    install(FILES "Resources/icons/tray_monochrome.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "io.github.kukuruzka165.materialgram-symbolic.svg")
-    install(FILES "Resources/icons/tray_monochrome_attention.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "io.github.kukuruzka165.materialgram-attention-symbolic.svg")
-    install(FILES "Resources/icons/tray_monochrome_mute.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "io.github.kukuruzka165.materialgram-mute-symbolic.svg")
-    install(FILES "../lib/xdg/io.github.kukuruzka165.materialgram.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/io.github.kukuruzka165.materialgram.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/io.github.kukuruzka165.materialgram.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo")
+    install(FILES "Resources/art/icon16.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps" RENAME "xyz.intergod.opengram.png")
+    install(FILES "Resources/art/icon32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "xyz.intergod.opengram.png")
+    install(FILES "Resources/art/icon48.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48/apps" RENAME "xyz.intergod.opengram.png")
+    install(FILES "Resources/art/icon64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "xyz.intergod.opengram.png")
+    install(FILES "Resources/art/icon128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "xyz.intergod.opengram.png")
+    install(FILES "Resources/art/icon256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "xyz.intergod.opengram.png")
+    install(FILES "Resources/art/icon512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "xyz.intergod.opengram.png")
+    install(FILES "Resources/icons/tray_monochrome.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "xyz.intergod.opengram-symbolic.svg")
+    install(FILES "Resources/icons/tray_monochrome_attention.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "xyz.intergod.opengram-attention-symbolic.svg")
+    install(FILES "Resources/icons/tray_monochrome_mute.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "xyz.intergod.opengram-mute-symbolic.svg")
+    install(FILES "../lib/xdg/xyz.intergod.opengram.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/xyz.intergod.opengram.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/xyz.intergod.opengram.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo")
 endif()

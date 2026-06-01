@@ -377,7 +377,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_edit_caption_voice" = "Sorry, you can't edit messages when you have an unsent voice message.";
 
 "lng_intro_about" = "Welcome to the official Telegram Desktop app.\nIt's fast and secure.";
-"materialgram_intro_about" = "Thanks for installing!\nNew releases are available in @materialgram channel or on GitHub";
+"opengram_intro_about" = "Thanks for installing!\nNew releases are available in @opengram channel or on GitHub";
 "lng_start_msgs" = "Start Messaging";
 
 "lng_intro_next" = "Next";
@@ -1297,8 +1297,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_faq" = "Telegram FAQ";
 "lng_settings_faq_subtitle" = "FAQ";
 "lng_settings_faq_link" = "https://telegram.org/faq#general-questions";
-"materialgram_settings_channel" = "@materialgram";
-"materialgram_settings_github" = "GitHub Releases";
+"opengram_settings_channel" = "@opengram";
+"opengram_settings_github" = "GitHub Releases";
 "lng_settings_features" = "Telegram Features";
 "lng_settings_credits" = "My Stars";
 "lng_settings_currency" = "My TON";
@@ -1729,8 +1729,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_via_link_shared_many#one" = "Link shared with **{count} user**.";
 "lng_via_link_shared_many#other" = "Link shared with **{count} users**.";
 
-"materialgram_info_registration" = "Registration date";
-"materialgram_info_dc" = "DC";
+"opengram_info_registration" = "Registration date";
+"opengram_info_dc" = "DC";
 "lng_info_personal_channel_label" = "Channel";
 "lng_info_mobile_label" = "Mobile";
 "lng_info_mobile_context_menu_fragment_about" = "This number is not tied to a SIM card and was acquired on {link}.";
@@ -5577,9 +5577,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_about_version" = "version {version}";
 "lng_about_text1" = "Official free messaging app based on {api_link}\nfor speed and security.";
 "lng_about_text1_api" = "Telegram API";
-"materialgram_about_text1" = "Feature list is available on {features_link}.";
-"materialgram_about_github" = "GitHub";
-"materialgram_about_text3" = "Made with ❤️ in 🇺🇦";
+"opengram_about_text1" = "Feature list is available on {features_link}.";
+"opengram_about_github" = "GitHub";
+"opengram_about_text3" = "Made with ❤️ in 🇺🇦";
 "lng_about_text2" = "This software is licensed under {gpl_link} version 3.\nSource code is available on {github_link}.";
 "lng_about_text3" = "Visit the {faq_link} for more info.";
 "lng_about_text3_faq" = "Telegram FAQ";
@@ -7067,6 +7067,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_screen_reader_confirm_disable" = "Disable";
 "lng_screen_reader_settings_title" = "Screen reader";
 "lng_screen_reader_settings_disable" = "Disable screen reader mode";
+
+"lng_plugins_title" = "Plugins";
+"lng_plugins_manage" = "Manage plugins";
+"lng_plugins_install_title" = "Install plugin";
+"lng_plugins_install_button" = "Install";
+"lng_plugins_reinstall" = "Reinstall";
+"lng_plugins_install_about" = "Plugins can read and send your messages. Only install plugins from sources you trust.";
+"lng_plugins_invalid" = "This is not a valid opengram plugin file.";
+"lng_plugins_version" = "Version {version}";
+"lng_plugins_author" = "by {name}";
+"lng_plugins_none" = "No plugins installed yet.";
+"lng_plugins_add" = "Install from file…";
+"lng_plugins_reload" = "Reload plugins";
+"lng_plugins_reloaded" = "Plugins reloaded.";
+"lng_plugins_installed" = "Plugin installed.";
+"lng_plugins_remove" = "Remove";
+"lng_plugins_remove_sure" = "Remove plugin {name}?";
+"lng_plugins_removed" = "Plugin removed.";
+"lng_plugins_enabled" = "Enabled";
+"lng_plugins_state_off" = "off";
 
 "lng_filters_all" = "All chats";
 "lng_filters_all_short" = "All";

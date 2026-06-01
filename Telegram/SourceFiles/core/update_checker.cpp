@@ -1640,11 +1640,11 @@ void UpdateApplication() {
 			return "https://itunes.apple.com/ae/app/telegram-desktop/id946399090";
 #else // OS_WIN_STORE || OS_MAC_STORE
 			if (KSandbox::isFlatpak()) {
-				return "https://flathub.org/apps/details/io.github.kukuruzka165.materialgram";
+				return "https://flathub.org/apps/details/xyz.intergod.opengram";
 			} else if (KSandbox::isSnap()) {
 				return "https://snapcraft.io/telegram-desktop";
 			}
-			return "https://github.com/kukuruzka165/materialgram/releases";
+			return "https://github.com/intergodd/opengram/releases";
 #endif // OS_WIN_STORE || OS_MAC_STORE
 		}();
 		UrlClickHandler::Open(url);
