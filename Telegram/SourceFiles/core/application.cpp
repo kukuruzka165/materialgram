@@ -84,6 +84,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
+#include "plugins/plugins_box.h"
 #include "boxes/abstract_box.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
@@ -1141,7 +1142,19 @@ void Application::checkStartUrls() {
 		cRefStartUrls() = ranges::views::all(
 			cRefStartUrls()
 		) | ranges::views::filter([&](const QUrl &url) {
-			if (url.scheme() == u"tonsite"_q) {
+			if (url.isLocalFile()
+				&& url.toLocalFile().endsWith(
+					u".plg"_q,
+					Qt::CaseInsensitive)) {
+				const auto controller = _lastActivePrimaryWindow
+					? _lastActivePrimaryWindow->sessionController()
+					: nullptr;
+				if (controller) {
+					Plugins::ShowInstallBox(controller, url.toLocalFile());
+					return false;
+				}
+				return true;
+			} else if (url.scheme() == u"tonsite"_q) {
 				iv().showTonSite(url.toString(), {});
 				return false;
 			} else if (_lastActivePrimaryWindow) {
@@ -1182,7 +1195,7 @@ bool Application::openInternalUrl(const QString &url, QVariant context) {
 }
 
 QString Application::changelogLink() const {
-	const auto base = u"https://github.com/kukuruzka165/materialgram/commits"_q;
+	const auto base = u"https://github.com/intergodd/opengram/commits"_q;
 	return base;
 }
 

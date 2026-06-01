@@ -125,7 +125,7 @@ menuIconNightMode: icon {{ "menu/night_mode", menuIconColor }};
 menuIconNotifications: icon {{ "menu/info_notifications", menuIconColor }};
 menuIconLock: icon {{ "menu/lock", menuIconColor }};
 menuIconPowerUsage: icon {{ "menu/power_usage", menuIconColor }};
-menuIconMaterialgram: icon {{ "menu/materialgram", menuIconColor }};
+menuIconOpengram: icon {{ "menu/opengram", menuIconColor }};
 menuIconGitHub: icon {{ "menu/github", menuIconColor }};
 menuIconFaq: icon {{ "menu/faq", menuIconColor }};
 menuIconEmojiObjects: icon {{ "emoji/emoji_objects", menuIconColor }};

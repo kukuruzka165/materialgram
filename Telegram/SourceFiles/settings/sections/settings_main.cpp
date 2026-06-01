@@ -522,23 +522,23 @@ void BuildHelpSection(SectionBuilder &builder) {
 	});
 
 	builder.addButton({
-		.id = u"materialgram-channel"_q,
-		.title = tr::materialgram_settings_channel(),
-		.icon = { &st::menuIconMaterialgram },
+		.id = u"opengram-channel"_q,
+		.title = tr::opengram_settings_channel(),
+		.icon = { &st::menuIconOpengram },
 		.onClick = [=] {
-			UrlClickHandler::Open("https://t.me/materialgram");
+			UrlClickHandler::Open("https://t.me/opengram");
 		},
-		.keywords = { u"materialgram"_q, u"channel"_q },
+		.keywords = { u"opengram"_q, u"channel"_q },
 	});
 
 	builder.addButton({
-		.id = u"materialgram-releases"_q,
-		.title = tr::materialgram_settings_github(),
+		.id = u"opengram-releases"_q,
+		.title = tr::opengram_settings_github(),
 		.icon = { &st::menuIconGitHub },
 		.onClick = [=] {
-			UrlClickHandler::Open("https://github.com/kukuruzka165/materialgram/releases");
+			UrlClickHandler::Open("https://github.com/intergodd/opengram/releases");
 		},
-		.keywords = { u"materialgram"_q, u"github"_q, u"releases"_q },
+		.keywords = { u"opengram"_q, u"github"_q, u"releases"_q },
 	});
 
 	builder.addButton({

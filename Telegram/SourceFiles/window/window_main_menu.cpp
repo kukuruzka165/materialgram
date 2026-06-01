@@ -384,8 +384,8 @@ MainMenu::MainMenu(
 	parentResized();
 
 	_telegram->setMarkedText(tr::link(
-		u"materialgram"_q,
-		u"https://github.com/kukuruzka165/materialgram"_q));
+		u"opengram"_q,
+		u"https://github.com/intergodd/opengram"_q));
 	_telegram->setLinksTrusted();
 	_version->setMarkedText(
 		tr::link(

@@ -1300,7 +1300,7 @@ void CheckPollVoteNotificationSchedule(
 }
 
 [[nodiscard]] TextWithEntities UnsupportedMessageText() {
-	const auto siteLink = u"https://github.com/kukuruzka165/materialgram/releases"_q;
+	const auto siteLink = u"https://github.com/intergodd/opengram/releases"_q;
 	auto result = TextWithEntities{
 		tr::lng_message_unsupported(tr::now, lt_link, siteLink)
 	};

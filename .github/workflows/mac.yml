@@ -66,7 +66,7 @@ jobs:
         if: env.ONLY_CACHE == 'false'
         run: |
           cd $REPO_NAME/Telegram
-          echo "ARTIFACT_NAME=materialgram" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=opengram" >> $GITHUB_ENV
 
           ./configure.sh \
           -D CMAKE_CONFIGURATION_TYPES=Release \
@@ -82,7 +82,7 @@ jobs:
         run: |
           cd $REPO_NAME/out/Release
           mkdir artifact
-          mv materialgram.app artifact/
+          mv opengram.app artifact/
           mv Updater artifact/
 
       - uses: actions/upload-artifact@v7

@@ -66,7 +66,7 @@ def update_metadata(metadata_path, changelog, max_items=None):
 def main():
     ap = argparse.ArgumentParser("Parse Telegram changelog")
     ap.add_argument("-c", "--changelog-path", default="changelog.txt")
-    ap.add_argument("-m", "--metadata-path", default="lib/xdg/io.github.kukuruzka165.materialgram.metainfo.xml")
+    ap.add_argument("-m", "--metadata-path", default="lib/xdg/xyz.intergod.opengram.metainfo.xml")
     ap.add_argument("-n", "--num-releases", type=int, default=None)
     args = ap.parse_args()
     update_metadata(args.metadata_path,

@@ -893,7 +893,7 @@ COPY --link --from=tde2e /usr/src/tde2e-cache /
 COPY --link --from=patches /usr/src/patches patches
 RUN patch -p1 -d /usr/lib64/gobject-introspection -i $PWD/patches/gobject-introspection.patch && rm -rf patches
 
-WORKDIR /usr/src/materialgram
+WORKDIR /usr/src/opengram
 USER user
-VOLUME [ "/usr/src/materialgram" ]
-CMD [ "/usr/src/materialgram/Telegram/build/docker/centos_env/build.sh" ]
+VOLUME [ "/usr/src/opengram" ]
+CMD [ "/usr/src/opengram/Telegram/build/docker/centos_env/build.sh" ]
