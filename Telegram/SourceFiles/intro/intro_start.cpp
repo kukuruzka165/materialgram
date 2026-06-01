@@ -27,8 +27,8 @@ StartWidget::StartWidget(
 	Window::Theme::Apply(":/gui/Google Day.tdesktop-theme");
 	Window::Theme::KeepApplied();
 	setMouseTracking(true);
-	setTitleText(rpl::single(u"materialgram"_q));
-	setDescriptionText(tr::materialgram_intro_about());
+	setTitleText(rpl::single(u"opengram"_q));
+	setDescriptionText(tr::opengram_intro_about());
 	show();
 }
 

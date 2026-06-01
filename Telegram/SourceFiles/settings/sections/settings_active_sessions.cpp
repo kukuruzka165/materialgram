@@ -66,7 +66,7 @@ enum class DeviceType {
 	Firefox,
 	Safari,
 	Other,
-	Materialgram,
+	Opengram,
 	Octogram,
 	Swiftgram,
 };
@@ -210,8 +210,8 @@ void RenameBox(not_null<Ui::GenericBox*> box) {
 		return {};
 	};
 
-	if (info.contains("materialgram")) {
-		return DeviceType::Materialgram;
+	if (info.contains("opengram")) {
+		return DeviceType::Opengram;
 	} else if (info.contains("octogram")) {
 		return DeviceType::Octogram;
 	} else if (info.contains("swiftgram")) {
@@ -250,7 +250,7 @@ void RenameBox(not_null<Ui::GenericBox*> box) {
 		case DeviceType::Windows:
 		case DeviceType::Mac:
 		case DeviceType::Other:
-		case DeviceType::Materialgram:
+		case DeviceType::Opengram:
 			// Blue.
 			return { st::historyPeer4UserpicBg, st::historyPeer4UserpicBg2 };
 		case DeviceType::Ubuntu:
@@ -298,7 +298,7 @@ void RenameBox(not_null<Ui::GenericBox*> box) {
 	case DeviceType::Firefox: return st::sessionIconFirefox;
 	case DeviceType::Safari: return st::sessionIconSafari;
 	case DeviceType::Other: return st::sessionIconOther;
-	case DeviceType::Materialgram: return st::sessionIconMaterialgram;
+	case DeviceType::Opengram: return st::sessionIconOpengram;
 	case DeviceType::Octogram: return st::sessionIconOctogram;
 	case DeviceType::Swiftgram: return st::sessionIconSwiftgram;
 	}
@@ -309,7 +309,7 @@ void RenameBox(not_null<Ui::GenericBox*> box) {
 	switch (type) {
 	case DeviceType::Web: return &st::sessionBigIconWeb;
 	case DeviceType::Other: return &st::sessionBigIconOther;
-	case DeviceType::Materialgram: return &st::sessionBigIconMaterialgram;
+	case DeviceType::Opengram: return &st::sessionBigIconOpengram;
 	case DeviceType::Octogram: return &st::sessionBigIconOctogram;
 	case DeviceType::Swiftgram: return &st::sessionBigIconSwiftgram;
 	}

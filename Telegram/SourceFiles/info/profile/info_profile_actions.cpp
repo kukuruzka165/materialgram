@@ -1683,13 +1683,13 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			st::infoProfileLabeledUsernamePadding);
 		if (Core::App().settings().birthDateEnabled()) {
 			addInfoOneLine(
-				tr::materialgram_info_registration(),
+				tr::opengram_info_registration(),
 				RegistrationValue(user),
 				tr::lng_context_copy_text(tr::now));
 		}
 		if (user->hasUserpic() && Core::App().settings().datacenterEnabled()) {
 			addInfoOneLine(
-				tr::materialgram_info_dc(),
+				tr::opengram_info_dc(),
 				DataCenterValue(_peer),
 				tr::lng_context_copy_text(tr::now));
 		}
@@ -1826,7 +1826,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 
 		if (_peer->hasUserpic() && Core::App().settings().datacenterEnabled()) {
 			addInfoOneLine(
-				tr::materialgram_info_dc(),
+				tr::opengram_info_dc(),
 				DataCenterValue(_peer),
 				tr::lng_context_copy_text(tr::now));
 		}

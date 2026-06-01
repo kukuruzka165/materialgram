@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component type="desktop">
-    <id>io.github.kukuruzka165.materialgram</id>
+    <id>xyz.intergod.opengram</id>
     <metadata_license>CC0-1.0</metadata_license>
     <project_license>GPL-3.0</project_license>
-    <name>materialgram</name>
+    <name>opengram</name>
     <summary>Googlized Telegram</summary>
     <description>
         <p>Telegram Desktop based messenger with Material Design and additional features</p>
@@ -14,19 +14,19 @@
     </categories>
     <update_contact>kukuruzka165_at_gmail.com</update_contact>
     <developer_name>kukuruzka165</developer_name>
-    <url type="homepage">https://github.com/kukuruzka165/materialgram</url>
-    <url type="bugtracker">https://github.com/kukuruzka165/materialgram/issues</url>
-    <url type="contribute">https://github.com/kukuruzka165/materialgram/raw/main/.github/CONTRIBUTING.md</url>
+    <url type="homepage">https://github.com/intergodd/opengram</url>
+    <url type="bugtracker">https://github.com/intergodd/opengram/issues</url>
+    <url type="contribute">https://github.com/intergodd/opengram/raw/main/.github/CONTRIBUTING.md</url>
     <screenshots>
       <screenshot type="default">
-	<image>https://github.com/kukuruzka165/materialgram/raw/main/docs/assets/preview.png</image>
+	<image>https://github.com/intergodd/opengram/raw/main/docs/assets/preview.png</image>
       </screenshot>
     </screenshots>
     <keywords>
         <keyword>tg</keyword>
         <keyword>telegram</keyword>
 		<keyword>tdesktop</keyword>
-		<keyword>materialgram</keyword>
+		<keyword>opengram</keyword>
         <keyword>messaging</keyword>
         <keyword>messenger</keyword>
         <keyword>chat</keyword>
@@ -72,10 +72,10 @@
         <content_attribute id="money-gambling">none</content_attribute>
         <content_attribute id="money-advertising">moderate</content_attribute>
     </content_rating>
-    <launchable type="desktop-id">io.github.kukuruzka165.materialgram.desktop</launchable>
+    <launchable type="desktop-id">xyz.intergod.opengram.desktop</launchable>
     <provides>
-        <binary>materialgram</binary>
-		<dbus type="session">io.github.kukuruzka165.materialgram</dbus>
+        <binary>opengram</binary>
+		<dbus type="session">xyz.intergod.opengram</dbus>
         <mediatype>x-scheme-handler/tg</mediatype>
 		<mediatype>x-scheme-handler/tonsite</mediatype>
     </provides>

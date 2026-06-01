@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
+#include "plugins/plugins_box.h"
 #include "settings/settings_builder.h"
 #include "settings/sections/settings_main.h"
 #include "settings/sections/settings_chat.h"
@@ -1220,6 +1221,31 @@ void BuildScreenReaderSection(SectionBuilder &builder) {
 	builder.addSkip();
 }
 
+void BuildPluginsSection(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+
+	builder.addDivider();
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"advanced/plugins"_q,
+		.title = tr::lng_plugins_title(),
+		.keywords = { u"plugins"_q, u"extensions"_q, u"plg"_q },
+	});
+
+	builder.addButton({
+		.id = u"advanced/plugins_manage"_q,
+		.title = tr::lng_plugins_manage(),
+		.icon = { &st::menuIconStickers },
+		.onClick = [=] {
+			Plugins::ShowManagerBox(controller);
+		},
+		.keywords = { u"plugins"_q, u"extensions"_q, u"plg"_q },
+	});
+
+	builder.addSkip();
+	builder.addDividerText(tr::lng_plugins_install_about());
+}
+
 class Advanced : public Section<Advanced> {
 public:
 	Advanced(
@@ -1254,6 +1280,7 @@ const auto kMeta = BuildHelper({
 	BuildPerformanceSection(builder);
 	BuildSpellcheckerSection(builder);
 	BuildScreenReaderSection(builder);
+	BuildPluginsSection(builder);
 	if (autoUpdate) {
 		BuildUpdateSection(builder, false);
 	}

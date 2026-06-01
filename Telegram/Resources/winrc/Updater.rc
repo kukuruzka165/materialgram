@@ -52,10 +52,10 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "kukuruzka"
-            VALUE "FileDescription", "materialgram Updater"
+            VALUE "FileDescription", "opengram Updater"
             VALUE "FileVersion", "6.7.7.1"
-            VALUE "LegalCopyright", "github.com/kukuruzka165/materialgram"
-            VALUE "ProductName", "materialgram"
+            VALUE "LegalCopyright", "github.com/intergodd/opengram"
+            VALUE "ProductName", "opengram"
             VALUE "ProductVersion", "6.7.7.1"
         END
     END

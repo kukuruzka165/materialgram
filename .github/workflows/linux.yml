@@ -21,7 +21,7 @@ jobs:
     outputs:
       tagname: ${{ steps.tagname.outputs.tagname }}
     env:
-      IMAGE_TAG: materialgram:build
+      IMAGE_TAG: opengram:build
 
     steps:
       - name: Set TAGNAME
@@ -51,7 +51,7 @@ jobs:
           docker pull ghcr.io/telegramdesktop/tdesktop/centos_env
           docker tag ghcr.io/telegramdesktop/tdesktop/centos_env $IMAGE_TAG
 
-      - name: materialgram build
+      - name: opengram build
         run: |
           docker run --rm \
           -u $(id -u) \
@@ -66,13 +66,13 @@ jobs:
       - name: Create Tar
         run: |
           cd out/install
-          tar -I 'zstd -T0 --ultra -22' -cvf materialgram-${{ env.TAGNAME }}.tar.zst usr
+          tar -I 'zstd -T0 --ultra -22' -cvf opengram-${{ env.TAGNAME }}.tar.zst usr
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: materialgram-${{ env.TAGNAME }}
-          path: out/install/materialgram-${{ env.TAGNAME }}.tar.zst
+          name: opengram-${{ env.TAGNAME }}
+          path: out/install/opengram-${{ env.TAGNAME }}.tar.zst
 
       - name: Upload artifact to Release
         uses: softprops/action-gh-release@v2
@@ -80,7 +80,7 @@ jobs:
           name: ${{ env.TAGNAME }}
           tag_name: ${{ env.TAGNAME }}
           token: ${{ secrets.PAT }}
-          files: out/install/materialgram-${{ env.TAGNAME }}.tar.zst
+          files: out/install/opengram-${{ env.TAGNAME }}.tar.zst
 
   trigger-workflow:
     runs-on: ubuntu-latest
@@ -101,6 +101,6 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.OKsPAT }}
-          repository: materialgram/materialgram-bin
+          repository: opengram/opengram-bin
           event-type: new-release
           client-payload: '{"tagname": "${{ env.TAGNAME }}", "pkgrel": "${{ env.PKGREL }}"}'

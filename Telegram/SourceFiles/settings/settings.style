@@ -380,14 +380,14 @@ sessionIconEdge: icon{{ "settings/devices/device_web_edge", historyPeerUserpicFg
 sessionIconFirefox: icon{{ "settings/devices/device_web_firefox", historyPeerUserpicFg }};
 sessionIconSafari: icon{{ "settings/devices/device_web_safari", historyPeerUserpicFg }};
 sessionIconOther: icon{{ "settings/devices/device_other", historyPeerUserpicFg }};
-sessionIconMaterialgram: icon{{ "settings/devices/device_materialgram", historyPeerUserpicFg }};
+sessionIconOpengram: icon{{ "settings/devices/device_opengram", historyPeerUserpicFg }};
 sessionIconOctogram: icon{{ "settings/devices/device_octogram", historyPeerUserpicFg }};
 sessionIconSwiftgram: icon{{ "settings/devices/device_swiftgram", historyPeerUserpicFg }};
 sessionBigUserpicSize: 70px;
 sessionBigLottieSize: 52px;
 sessionBigIconOther: icon{{ "settings/devices/device_other_large", historyPeerUserpicFg }};
 sessionBigIconWeb: icon{{ "settings/devices/device_web_other_large", historyPeerUserpicFg }};
-sessionBigIconMaterialgram: icon{{ "settings/devices/device_materialgram_large", historyPeerUserpicFg }};
+sessionBigIconOpengram: icon{{ "settings/devices/device_opengram_large", historyPeerUserpicFg }};
 sessionBigIconOctogram: icon{{ "settings/devices/device_octogram_large", historyPeerUserpicFg }};
 sessionBigIconSwiftgram: icon{{ "settings/devices/device_swiftgram_large", historyPeerUserpicFg }};
 sessionBigCoverPadding: margins(0px, 18px, 0px, 7px);

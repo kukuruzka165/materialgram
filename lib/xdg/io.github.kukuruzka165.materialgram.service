@@ -1,3 +1,0 @@
-[D-BUS Service]
-Name=io.github.kukuruzka165.materialgram
-Exec=@CMAKE_INSTALL_FULL_BINDIR@/materialgram

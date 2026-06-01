@@ -34,9 +34,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 rpl::producer<TextWithEntities> Text1() {
-	return tr::materialgram_about_text1(
+	return tr::opengram_about_text1(
 		lt_features_link,
-		tr::materialgram_about_github(tr::url(u"https://github.com/kukuruzka165/materialgram#features"_q)),
+		tr::opengram_about_github(tr::url(u"https://github.com/intergodd/opengram#features"_q)),
 		tr::marked);
 }
 
@@ -49,18 +49,18 @@ rpl::producer<TextWithEntities> Text2() {
 		lt_github_link,
 		rpl::single(tr::link(
 			"GitHub",
-			"https://github.com/kukuruzka165/materialgram")),
+			"https://github.com/intergodd/opengram")),
 			tr::marked);
 }
 
 rpl::producer<TextWithEntities> Text3() {
-	return tr::materialgram_about_text3(tr::marked);
+	return tr::opengram_about_text3(tr::marked);
 }
 
 } // namespace
 
 void AboutBox(not_null<Ui::GenericBox*> box) {
-	box->setTitle(u"materialgram"_q);
+	box->setTitle(u"opengram"_q);
 
 	auto layout = box->verticalLayout();
 
@@ -102,7 +102,7 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 			box->getDelegate()->show(
 				Ui::MakeInformBox(
 					"The link to the current private alpha "
-					"version of materialgram was copied "
+					"version of opengram was copied "
 					"to the clipboard."));
 		} else {
 			File::OpenUrl(Core::App().changelogLink());

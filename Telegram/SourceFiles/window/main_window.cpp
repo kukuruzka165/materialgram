@@ -835,7 +835,7 @@ void MainWindow::updateTitle() {
 		: Dialogs::Key();
 	const auto thread = key ? key.thread() : nullptr;
 	if (!thread) {
-		setTitle((user.isEmpty() ? u"materialgram"_q : user) + added);
+		setTitle((user.isEmpty() ? u"opengram"_q : user) + added);
 		return;
 	}
 	const auto history = thread->owningHistory();

@@ -427,7 +427,7 @@ void MainWindow::createGlobalMenu() {
 		tr::lng_mac_menu_about_telegram(
 			tr::now,
 			lt_telegram,
-			u"materialgram"_q),
+			u"opengram"_q),
 		[=] {
 			ensureWindowShown();
 			controller().show(Box(AboutBox));
