@@ -31,13 +31,53 @@ constexpr auto kReadLimit = 256 * 1024;
 
 const auto kDisabledSuffix = u".off"_q;
 const auto kPluginSuffix = u".plg"_q;
+const auto kExteraSuffix = u".plugin"_q;
+
+[[nodiscard]] bool IsPluginName(const QString &name) {
+	return name.endsWith(kPluginSuffix, Qt::CaseInsensitive)
+		|| name.endsWith(kExteraSuffix, Qt::CaseInsensitive);
+}
 
 [[nodiscard]] QString PythonExecutable() {
+	// Prefer a Python runtime bundled next to the executable, so plugins work
+	// even when the user has no system Python installed.
 #ifdef Q_OS_WIN
-	return u"python"_q;
+	const auto bundled = {
+		cExeDir() + u"python/python.exe"_q,
+		cExeDir() + u"python/pythonw.exe"_q,
+	};
+	const auto fallback = u"python"_q;
 #else // Q_OS_WIN
-	return u"python3"_q;
+	const auto bundled = {
+		cExeDir() + u"python/bin/python3"_q,
+		cExeDir() + u"python3"_q,
+	};
+	const auto fallback = u"python3"_q;
 #endif // Q_OS_WIN
+	for (const auto &candidate : bundled) {
+		if (QFile::exists(candidate)) {
+			return candidate;
+		}
+	}
+	return fallback;
+}
+
+void CopyTree(const QString &from, const QString &to) {
+	const auto source = QDir(from);
+	if (!source.exists()) {
+		return;
+	}
+	QDir().mkpath(to);
+	const auto entries = source.entryInfoList(
+		QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+	for (const auto &entry : entries) {
+		const auto target = to + '/' + entry.fileName();
+		if (entry.isDir()) {
+			CopyTree(entry.absoluteFilePath(), target);
+		} else if (!QFile::exists(target)) {
+			QFile::copy(entry.absoluteFilePath(), target);
+		}
+	}
 }
 
 [[nodiscard]] QString PluginsRoot() {
@@ -58,6 +98,11 @@ const auto kPluginSuffix = u".plg"_q;
 		QRegularExpression::MultilineOption);
 	const auto match = expression.match(source);
 	return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+[[nodiscard]] QString MetaValue(const QString &source, const QString &field) {
+	auto result = CapturedValue(source, u"__"_q + field + u"__"_q);
+	return result.isEmpty() ? CapturedValue(source, field) : result;
 }
 
 } // namespace
@@ -88,8 +133,19 @@ void Bridge::ensureDirectory() {
 
 void Bridge::start() {
 	const auto root = PluginsRoot();
-	if (!QDir(root).exists()) {
-		LOG(("Plugins: directory not found, bridge disabled (%1).").arg(root));
+	QDir().mkpath(root);
+
+	// Seed the sidecar runtime (the opengram_plugins package and examples)
+	// from the copy shipped next to the executable, so the bridge runs even
+	// on a fresh profile.
+	const auto bundled = cExeDir() + u"plugins"_q;
+	if (bundled != root) {
+		CopyTree(bundled + u"/opengram_plugins"_q, root + u"/opengram_plugins"_q);
+		CopyTree(bundled + u"/examples"_q, root + u"/examples"_q);
+	}
+
+	if (!QFile::exists(root + u"/opengram_plugins/sidecar.py"_q)) {
+		LOG(("Plugins: runtime missing, execution disabled (%1).").arg(root));
 		return;
 	}
 	ensureDirectory();
@@ -123,7 +179,7 @@ void Bridge::start() {
 std::optional<Plugin> Bridge::ReadMetadata(const QString &path) {
 	const auto info = QFileInfo(path);
 	const auto canonical = CanonicalName(info.fileName());
-	if (!canonical.endsWith(kPluginSuffix, Qt::CaseInsensitive)) {
+	if (!IsPluginName(canonical)) {
 		return std::nullopt;
 	}
 	auto file = QFile(path);
@@ -131,17 +187,22 @@ std::optional<Plugin> Bridge::ReadMetadata(const QString &path) {
 		return std::nullopt;
 	}
 	const auto source = QString::fromUtf8(file.read(kReadLimit));
-	if (!source.contains(u"Plugin"_q)) {
+	const auto looksLikePlugin = source.contains(u"Plugin"_q)
+		|| source.contains(u"__name__"_q)
+		|| source.contains(u"__id__"_q);
+	if (!looksLikePlugin) {
 		return std::nullopt;
 	}
 	auto result = Plugin();
 	result.fileName = canonical;
-	result.name = CapturedValue(source, u"name"_q);
+	result.name = MetaValue(source, u"name"_q);
 	if (result.name.isEmpty()) {
-		result.name = canonical.chopped(kPluginSuffix.size());
+		const auto dot = canonical.lastIndexOf('.');
+		result.name = (dot > 0) ? canonical.left(dot) : canonical;
 	}
-	result.version = CapturedValue(source, u"version"_q);
-	result.description = CapturedValue(source, u"description"_q);
+	result.version = MetaValue(source, u"version"_q);
+	result.description = MetaValue(source, u"description"_q);
+	result.author = MetaValue(source, u"author"_q);
 	return result;
 }
 
@@ -152,7 +213,10 @@ std::vector<Plugin> Bridge::list() const {
 		return result;
 	}
 	const auto entries = dir.entryList(
-		{ u"*"_q + kPluginSuffix, u"*"_q + kPluginSuffix + kDisabledSuffix },
+		{ u"*"_q + kPluginSuffix,
+			u"*"_q + kPluginSuffix + kDisabledSuffix,
+			u"*"_q + kExteraSuffix,
+			u"*"_q + kExteraSuffix + kDisabledSuffix },
 		QDir::Files,
 		QDir::Name);
 	for (const auto &entry : entries) {

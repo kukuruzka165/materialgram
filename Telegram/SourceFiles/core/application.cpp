@@ -1142,15 +1142,19 @@ void Application::checkStartUrls() {
 		cRefStartUrls() = ranges::views::all(
 			cRefStartUrls()
 		) | ranges::views::filter([&](const QUrl &url) {
-			if (url.isLocalFile()
-				&& url.toLocalFile().endsWith(
-					u".plg"_q,
-					Qt::CaseInsensitive)) {
+			const auto localFile = url.isLocalFile()
+				? url.toLocalFile()
+				: QString();
+			if (!localFile.isEmpty()
+				&& (localFile.endsWith(u".plg"_q, Qt::CaseInsensitive)
+					|| localFile.endsWith(
+						u".plugin"_q,
+						Qt::CaseInsensitive))) {
 				const auto controller = _lastActivePrimaryWindow
 					? _lastActivePrimaryWindow->sessionController()
 					: nullptr;
 				if (controller) {
-					Plugins::ShowInstallBox(controller, url.toLocalFile());
+					Plugins::ShowInstallBox(controller, localFile);
 					return false;
 				}
 				return true;

@@ -1965,6 +1965,21 @@ if (APPLE AND NOT build_macstore)
     )
 endif()
 
+# Ship the Python plugin runtime (the opengram_plugins sidecar package and
+# example plugins) next to the executable so the in-app plugin bridge can seed
+# a fresh profile and run without any system Python setup.
+if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../plugins)
+    add_custom_command(TARGET Telegram POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/opengram_plugins
+            $<TARGET_FILE_DIR:Telegram>/plugins/opengram_plugins
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/examples
+            $<TARGET_FILE_DIR:Telegram>/plugins/examples
+        COMMENT "Bundling opengram plugin runtime"
+    )
+endif()
+
 if (WIN32)
     # message(${CMAKE_GENERATOR})
     # mt.exe -manifest "${res_loc}/winrc/Telegram.manifest" "-inputresource:\"$<TARGET_FILE:Telegram>\";#1" "-outputresource:\"$<TARGET_FILE:Telegram>\";#1" >NUL

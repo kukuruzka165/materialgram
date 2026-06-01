@@ -26,6 +26,7 @@ struct Plugin {
 	QString name;
 	QString version;
 	QString description;
+	QString author;
 	bool enabled = true;
 };
 

@@ -7076,6 +7076,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_plugins_install_about" = "Plugins can read and send your messages. Only install plugins from sources you trust.";
 "lng_plugins_invalid" = "This is not a valid opengram plugin file.";
 "lng_plugins_version" = "Version {version}";
+"lng_plugins_author" = "by {name}";
 "lng_plugins_none" = "No plugins installed yet.";
 "lng_plugins_add" = "Install from file…";
 "lng_plugins_reload" = "Reload plugins";

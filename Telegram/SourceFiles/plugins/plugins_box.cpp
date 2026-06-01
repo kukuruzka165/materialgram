@@ -29,7 +29,8 @@ namespace Plugins {
 namespace {
 
 [[nodiscard]] QString PluginFilter() {
-	return u"opengram plugins (*.plg);;"_q + FileDialog::AllFilesFilter();
+	return u"opengram plugins (*.plg *.plugin);;"_q
+		+ FileDialog::AllFilesFilter();
 }
 
 [[nodiscard]] QString VersionLabel(const Plugin &plugin) {
@@ -67,6 +68,14 @@ void DetailsBox(
 		version->setText(
 			tr::lng_plugins_version(tr::now, lt_version, plugin->version));
 		version->setTextColorOverride(st::windowSubTextFg->c);
+	}
+	if (!plugin->author.isEmpty()) {
+		Ui::AddSkip(inner);
+		const auto author = box->addRow(
+			object_ptr<Ui::FlatLabel>(box, st::boxLabel));
+		author->setText(
+			tr::lng_plugins_author(tr::now, lt_name, plugin->author));
+		author->setTextColorOverride(st::windowSubTextFg->c);
 	}
 	if (!plugin->description.isEmpty()) {
 		Ui::AddSkip(inner);
@@ -147,6 +156,13 @@ void InstallBox(
 		version->setText(
 			tr::lng_plugins_version(tr::now, lt_version, metadata->version));
 		version->setTextColorOverride(st::windowSubTextFg->c);
+	}
+	if (!metadata->author.isEmpty()) {
+		const auto author = box->addRow(
+			object_ptr<Ui::FlatLabel>(box, st::boxLabel));
+		author->setText(
+			tr::lng_plugins_author(tr::now, lt_name, metadata->author));
+		author->setTextColorOverride(st::windowSubTextFg->c);
 	}
 	if (!metadata->description.isEmpty()) {
 		Ui::AddSkip(inner);
