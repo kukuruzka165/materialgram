@@ -53,6 +53,11 @@ private:
 	void start();
 	void ensureDirectory();
 	void handleIncoming(not_null<HistoryItem*> item);
+	void handleOutgoing(
+		not_null<PeerData*> peer,
+		const QString &text,
+		MsgId replyToId,
+		const QString &replyPath);
 	void sendEvent(const QJsonObject &event);
 	void readActions();
 	void handleAction(const QJsonObject &action);

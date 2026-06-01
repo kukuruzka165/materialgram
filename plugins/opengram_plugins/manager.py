@@ -32,7 +32,9 @@ class PluginManager:
         self._disabled = set()
 
     def discover(self):
-        return sorted(self.directory.glob(f"*{PLG_SUFFIX}"))
+        plg_files = list(self.directory.glob("*.plg"))
+        plugin_files = list(self.directory.glob("*.plugin"))
+        return sorted(plg_files + plugin_files, key=lambda p: p.name)
 
     def load_all(self):
         for path in self.discover():
@@ -51,6 +53,80 @@ class PluginManager:
             if plugin in self._disabled:
                 continue
             self._safe(plugin, "on_message", message)
+
+    def dispatch_outgoing_message(self, chat, text, reply_to, reply_path):
+        class MockPeer:
+            def __init__(self, chat_id):
+                try:
+                    self.id = int(chat_id)
+                except ValueError:
+                    self.id = 0
+                self.channel_id = abs(self.id) if self.id < 0 else 0
+                self.chat_id = abs(self.id) if self.id < 0 else 0
+                self.user_id = self.id if self.id > 0 else 0
+
+        class MockSize:
+            def __init__(self, filepath):
+                self._filepath = filepath
+                self.w = 600
+                self.h = 600
+
+        class MockPhoto:
+            def __init__(self, filepath):
+                self._filepath = filepath
+                self.sizes = [MockSize(filepath)]
+
+        class MockMediaPhoto:
+            def __init__(self, photo):
+                self.photo = photo
+
+        class MockDocument:
+            def __init__(self, filepath):
+                self._filepath = filepath
+                self.mime_type = "image/gif" if filepath.endswith(".gif") else "image/png"
+                self.path = filepath
+
+        class MockMediaDocument:
+            def __init__(self, document):
+                self.document = document
+
+        class MockMessageOwner:
+            def __init__(self, filepath):
+                self.id = 0
+                self._filepath = filepath
+                if filepath:
+                    ext = os.path.splitext(filepath)[1].lower()
+                    if ext in ('.png', '.jpg', '.jpeg'):
+                        self.media = MockMediaPhoto(MockPhoto(filepath))
+                    else:
+                        self.media = MockMediaDocument(MockDocument(filepath))
+                else:
+                    self.media = None
+
+        class MockMessage:
+            def __init__(self, msg_id, filepath):
+                self.id = msg_id
+                self._filepath = filepath
+                self.messageOwner = MockMessageOwner(filepath)
+                self.replyToMsg = None
+                self.replyToTopMsg = None
+
+        class HookParams:
+            def __init__(self, message, chat_id, reply_to_id, reply_path):
+                self.message = message
+                self.peer = MockPeer(chat_id)
+                self.replyToMsg = MockMessage(reply_to_id, reply_path) if reply_to_id else None
+                self.replyToTopMsg = None
+
+        # Build mock parameters mimicking Java structures for Hook API
+        params = HookParams(text, chat, reply_to, reply_path)
+
+        for plugin in self.plugins:
+            if plugin in self._disabled:
+                continue
+            if hasattr(plugin, "on_send_message_hook"):
+                # Call hook: on_send_message_hook(self, account, params)
+                self._safe(plugin, "on_send_message_hook", 0, params)
 
     def unload_all(self):
         while self.plugins:

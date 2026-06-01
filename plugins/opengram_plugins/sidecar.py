@@ -15,6 +15,7 @@ import json
 import os
 import sys
 
+from . import compatibility
 from .events import Message
 from .host import RpcHost
 from .manager import PluginManager
@@ -48,6 +49,13 @@ def main(argv=None):
                 sender=event.get("sender", ""),
                 text=event.get("text", ""),
             ))
+        elif kind == "outgoing_message":
+            manager.dispatch_outgoing_message(
+                chat=event.get("chat", ""),
+                text=event.get("text", ""),
+                reply_to=event.get("reply_to", 0),
+                reply_path=event.get("reply_path", ""),
+            )
         elif kind == "reload":
             manager.reload()
         elif kind == "shutdown":

@@ -13,5 +13,6 @@ def load_plg(path):
     module = SourceFileLoader(path.stem, str(path)).load_module()
     for value in vars(module).values():
         if isinstance(value, type) and issubclass(value, Plugin) and value is not Plugin:
-            return value()
+            if value.__module__ == module.__name__:
+                return value()
     raise ValueError(f"no Plugin subclass found in {path}")

@@ -57,6 +57,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat_filters.h"
 #include "data/data_histories.h"
 #include "data/data_history_messages.h"
+#include "data/data_media_types.h"
+#include "data/data_document.h"
+#include "data/data_photo.h"
+#include "plugins/plugins_bridge.h"
 #include "core/core_cloud_password.h"
 #include "core/application.h"
 #include "base/unixtime.h"
@@ -3997,6 +4001,29 @@ void ApiWrap::sendShortcutMessages(
 void ApiWrap::sendMessage(
 		MessageToSend &&message,
 		std::optional<MsgId> localMessageId) {
+	const auto text = message.textWithTags.text.trimmed();
+	if (text.startsWith('.') && text.size() > 1 && text[1].isLetterOrNumber()) {
+		const auto history = message.action.history;
+		const auto peer = history->peer;
+		const auto replyTo = message.action.replyTo.messageId
+			? peer->owner().message(message.action.replyTo.messageId)
+			: nullptr;
+		QString replyPath;
+		MsgId replyToId;
+		if (replyTo) {
+			replyToId = replyTo->id;
+			if (const auto media = replyTo->media()) {
+				if (const auto doc = media->document()) {
+					replyPath = doc->filepath(true);
+				} else if (const auto photo = media->photo()) {
+					replyPath = photo->location(true).name();
+				}
+			}
+		}
+		session().plugins().handleOutgoing(peer, text, replyToId, replyPath);
+		return;
+	}
+
 	const auto history = message.action.history;
 	const auto peer = history->peer;
 	auto &textWithTags = message.textWithTags;

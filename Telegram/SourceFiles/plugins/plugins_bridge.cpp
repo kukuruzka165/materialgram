@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "settings.h"
 #include "logs.h"
+#include "storage/localimageloader.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -340,6 +341,20 @@ void Bridge::handleIncoming(not_null<HistoryItem*> item) {
 	});
 }
 
+void Bridge::handleOutgoing(
+		not_null<PeerData*> peer,
+		const QString &text,
+		MsgId replyToId,
+		const QString &replyPath) {
+	sendEvent({
+		{ u"event"_q, u"outgoing_message"_q },
+		{ u"chat"_q, QString::number(peer->id.value) },
+		{ u"text"_q, text },
+		{ u"reply_to"_q, int(replyToId.value) },
+		{ u"reply_path"_q, replyPath },
+	});
+}
+
 void Bridge::sendEvent(const QJsonObject &event) {
 	if (_process.state() != QProcess::Running) {
 		return;
@@ -369,6 +384,29 @@ void Bridge::handleAction(const QJsonObject &action) {
 		auto message = Api::MessageToSend(Api::SendAction(history));
 		message.textWithTags = { text, {} };
 		_session->api().sendMessage(std::move(message));
+	} else if (type == u"send_file"_q) {
+		const auto raw = action.value(u"chat"_q).toString().toULongLong();
+		const auto path = action.value(u"path"_q).toString();
+		const auto replyToId = action.value(u"reply_to"_q).toInt();
+		if (!raw || path.isEmpty()) {
+			return;
+		}
+		const auto history = _session->data().history(PeerId(BareId(raw)));
+		auto file = QFile(path);
+		if (file.open(QIODevice::ReadOnly)) {
+			const auto content = file.readAll();
+			auto action = Api::SendAction(history);
+			if (replyToId) {
+				action.replyTo.messageId = replyToId;
+			}
+			const auto isPhoto = path.endsWith(u".png"_q, Qt::CaseInsensitive)
+				|| path.endsWith(u".jpg"_q, Qt::CaseInsensitive)
+				|| path.endsWith(u".jpeg"_q, Qt::CaseInsensitive);
+			_session->api().sendFile(
+				content,
+				isPhoto ? SendMediaType::Photo : SendMediaType::File,
+				action);
+		}
 	} else if (type == u"log"_q) {
 		LOG(("Plugins: %1").arg(action.value(u"text"_q).toString()));
 	}
