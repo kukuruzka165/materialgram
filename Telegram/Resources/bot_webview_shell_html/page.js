@@ -52,6 +52,8 @@
 	let iframe = null;
 	let frameLoaded = false;
 	let frameUrl = 'about:blank';
+	let frameOrigin = '';
+	let sameOrigin = false;
 	let frameGeneration = 0;
 	let reloadSupported = false;
 	let reloadTimeout = null;
@@ -85,7 +87,16 @@
 			&& (!window.location.port || window.location.port === '443');
 	}
 
-	function invokeNative(source, eventType, eventData) {
+	function originFromUrl(url) {
+		try {
+			const origin = new URL(url, window.location.href).origin;
+			return origin && origin !== 'null' ? origin : '';
+		} catch (e) {
+			return '';
+		}
+	}
+
+	function invokeNative(source, eventType, eventData, origin) {
 		if (!window.external
 			|| typeof window.external.invoke !== 'function'
 			|| typeof shellToken !== 'string'
@@ -100,7 +111,7 @@
 			type: nativeMessageType,
 			source: source,
 			token: shellToken,
-			origin: window.location.origin,
+			origin: origin || window.location.origin,
 			eventType: eventType,
 			eventData: normalizeEventData(eventData)
 		}));
@@ -110,8 +121,8 @@
 		invokeNative('shell', eventType, eventData);
 	}
 
-	function invokeWebApp(eventType, eventData) {
-		invokeNative('webapp', eventType, eventData);
+	function invokeWebApp(eventType, eventData, origin) {
+		invokeNative('webapp', eventType, eventData, origin);
 	}
 
 	function sendToFrame(eventType, eventData, generation) {
@@ -120,10 +131,14 @@
 			|| generation !== frameGeneration) {
 			return;
 		}
+		if (sameOrigin && !frameOrigin) {
+			return;
+		}
+		const targetOrigin = sameOrigin ? frameOrigin : '*';
 		iframe.contentWindow.postMessage(JSON.stringify({
 			eventType: eventType,
 			eventData: eventData || {}
-		}), '*');
+		}), targetOrigin);
 	}
 
 	function postToFrame(eventType, eventData) {
@@ -838,6 +853,9 @@
 			|| event.source !== iframe.contentWindow) {
 			return;
 		}
+		if (sameOrigin && (!frameOrigin || event.origin !== frameOrigin)) {
+			return;
+		}
 		const message = parseFrameMessage(event.data);
 		if (!message || typeof message.eventType !== 'string') {
 			return;
@@ -853,7 +871,7 @@
 			frameLoaded = false;
 			return;
 		}
-		invokeWebApp(message.eventType, message.eventData);
+		invokeWebApp(message.eventType, message.eventData, event.origin);
 	});
 
 	menuBackdrop.addEventListener('mousedown', closeMenu);
@@ -981,7 +999,9 @@
 			shellState.bottomText = '';
 			title.textContent = (data && data.title) || '';
 			document.title = (data && data.title) || 'Telegram';
+			sameOrigin = !!(data && data.sameOrigin);
 			frameUrl = (data && data.url) || 'about:blank';
+			frameOrigin = sameOrigin ? originFromUrl(frameUrl) : '';
 			createIframe(frameUrl);
 			renderButtons();
 			renderMenu();

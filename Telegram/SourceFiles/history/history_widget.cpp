@@ -64,6 +64,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "inline_bots/inline_bot_result.h"
 #include "base/event_filter.h"
+#include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
@@ -107,7 +108,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_components.h"
 #include "history/history_streamed_drafts.h"
 #include "history/history_unread_things.h"
+#include "history/history_view_pull_to_next_channel.h"
 #include "history/admin_log/history_admin_log_section.h"
+#include "history/view/controls/compose_controls_common.h"
 #include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/controls/history_view_compose_ai_tooltip.h"
@@ -141,6 +144,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_subsection_tabs.h"
 #include "history/view/history_view_translate_bar.h"
 #include "history/view/media/history_view_media.h"
+#ifdef TDESKTOP_IV_EDITOR
+#include "iv/editor/iv_editor_session.h"
+#endif // TDESKTOP_IV_EDITOR
 #include "core/click_handler_types.h"
 #include "chat_helpers/field_autocomplete.h"
 #include "chat_helpers/tabbed_panel.h"
@@ -270,6 +276,10 @@ HistoryWidget::HistoryWidget(
 	_scroll.data(),
 	controller->chatStyle(),
 	static_cast<HistoryView::CornerButtonsDelegate*>(this))
+, _pullToNext(std::make_unique<HistoryView::PullToNextChannel>(
+	this,
+	_scroll.data(),
+	controller))
 , _supportAutocomplete(session().supportMode()
 	? object_ptr<Support::Autocomplete>(this, &session())
 	: nullptr)
@@ -438,6 +448,11 @@ HistoryWidget::HistoryWidget(
 	) | rpl::on_next([=] {
 		fieldChanged();
 	}, _field->lifetime());
+	Data::AmPremiumValue(&session()) | rpl::on_next([=] {
+		checkCharsLimitation();
+		updateAiButtonVisibility();
+		updateSendAsFileVisibility();
+	}, lifetime());
 #ifdef Q_OS_MAC
 	// Removed an ability to insert text from the menu bar
 	// when the field is hidden.
@@ -544,7 +559,10 @@ HistoryWidget::HistoryWidget(
 	_field->setMimeDataHook(WrappedMessageFieldMimeHook([=](
 			not_null<const QMimeData*> data,
 			Ui::InputField::MimeAction action) {
-		const auto pasteResult = Ui::CheckLargeTextPaste(_field, data);
+		const auto pasteResult = Ui::CheckLargeTextPaste(
+			&session(),
+			_field,
+			data);
 		if (pasteResult.exceeds) {
 			if (action == Ui::InputField::MimeAction::Check) {
 				return true;
@@ -2130,6 +2148,29 @@ void HistoryWidget::fileChosen(ChatHelpers::FileChosen &&data) {
 			Data::InsertCustomEmoji(_field.data(), data.document);
 		}
 	} else if (_history) {
+		if (data.needsCaption) {
+			const auto document = data.document;
+			const auto from = data.messageSendingFrom;
+			Ui::SendGifWithCaption(
+				controller()->uiShow(),
+				_field,
+				document,
+				_peer,
+				sendMenuDetails(),
+				crl::guard(this, [=](
+						Api::SendOptions options,
+						TextWithTags caption) {
+					controller()->sendingAnimation().appendSending(from);
+					auto messageToSend = Api::MessageToSend(
+						prepareSendAction(options));
+					messageToSend.textWithTags = std::move(caption);
+					sendExistingDocument(
+						document,
+						std::move(messageToSend),
+						from.localId);
+				}));
+			return;
+		}
 		controller()->sendingAnimation().appendSending(
 			data.messageSendingFrom);
 		const auto localId = data.messageSendingFrom.localId;
@@ -2303,6 +2344,17 @@ void HistoryWidget::setupShortcuts() {
 			&& request->check(Command::ComposeAiApplyInPlace, 1)
 			&& request->handle([=] {
 				triggerAiApplyInPlace();
+				return true;
+			});
+		_preview
+			&& (_previewDrawPreview || _preview->draft().removed)
+			&& request->check(Command::ToggleWebPagePreview, 1)
+			&& request->handle([=] {
+				if (_previewDrawPreview) {
+					_preview->apply({ .removed = true });
+				} else {
+					_preview->apply({}, true);
+				}
 				return true;
 			});
 		if (showRecordButton()
@@ -2596,6 +2648,7 @@ void HistoryWidget::showHistory(
 	_highlighter.clear();
 	controller()->sendingAnimation().clear();
 	_topToast.hide(anim::type::instant);
+	_hiddenSenderTooltip.hide();
 	if (_history) {
 		if (_peer->id == peerId) {
 			updateForwarding();
@@ -2885,6 +2938,7 @@ void HistoryWidget::showHistory(
 		_scroll->hide();
 		_list = _scroll->setOwnedWidget(
 			object_ptr<HistoryInner>(this, _scroll, controller(), _history));
+		_pullToNext->attachToContent(_list);
 		_list->sendIntroSticker(
 		) | rpl::on_next([=](not_null<DocumentData*> sticker) {
 			sendExistingDocument(
@@ -3051,6 +3105,7 @@ void HistoryWidget::setHistory(History *history) {
 	if (_history == history) {
 		return;
 	}
+	_pullToNext->setHistory(history);
 
 	const auto was = _attachBotsMenu && _history && _history->peer->isUser();
 	const auto now = _attachBotsMenu && history && history->peer->isUser();
@@ -3144,6 +3199,7 @@ void HistoryWidget::refreshAttachBotsMenu() {
 		controller(),
 		_history->peer,
 		[=] { return prepareSendAction({}); },
+		[=] { return sendMenuDetails(); },
 		[=](bool compress) { chooseAttach(compress); });
 	if (!_attachBotsMenu) {
 		return;
@@ -4833,10 +4889,11 @@ void HistoryWidget::saveEditMessage(Api::SendOptions options) {
 		}
 		return;
 	} else {
-		const auto maxCaptionSize = !hasMediaWithCaption
-			? MaxMessageSize
-			: Data::PremiumLimits(&session()).captionLengthCurrent();
-		const auto remove = _fieldCharsCountManager.count() - maxCaptionSize;
+		const auto limits = Data::PremiumLimits(&session());
+		const auto maxTextSize = hasMediaWithCaption
+			? limits.captionLengthCurrent()
+			: limits.messageLengthCurrent();
+		const auto remove = _fieldCharsCountManager.count() - maxTextSize;
 		if (remove > 0) {
 			controller()->showToast(
 				tr::lng_edit_limit_reached(tr::now, lt_count, remove));
@@ -5192,7 +5249,7 @@ SendMenu::Details HistoryWidget::sendMenuDetails() const {
 }
 
 SendMenu::Details HistoryWidget::saveMenuDetails() const {
-	return (_editMsgId && _replyEditMsg)
+	return (_editMsgId && _replyEditMsg && !_replyEditMsg->richPage())
 		? _mediaEditManager.sendMenuDetails(HasSendText(_field))
 		: SendMenu::Details();
 }
@@ -5349,16 +5406,21 @@ void HistoryWidget::showAnimated(
 	if (_requestsBar) {
 		_requestsBar->finishAnimating();
 	}
-	_topShadow->setVisible(params.withTopBarShadow ? false : true);
+	const auto fromBottom = (direction == Window::SlideDirection::FromBottom);
+	_topShadow->setVisible(fromBottom
+		? params.withTopBarShadow
+		: !params.withTopBarShadow);
 	_preserveScrollTop = false;
 	_stickerToast = nullptr;
 
 	auto newContentCache = Ui::GrabWidget(this);
 
 	hideChildWidgets();
-	if (params.withTopBarShadow) _topShadow->show();
+	if (params.withTopBarShadow && !fromBottom) {
+		_topShadow->show();
+	}
 
-	if (_history) {
+	if (_history && !fromBottom) {
 		_topBar->show();
 		_topBar->setAnimatingMode(true);
 	}
@@ -5830,7 +5892,9 @@ bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
 			if (k->key() == Qt::Key_Up) {
 #ifdef Q_OS_MAC
 				// Cmd + Up is used instead of Home.
-				if (HasSendText(_field)) {
+				if (HasSendText(_field)
+					&& !base::options::value<bool>(
+						HistoryView::Controls::kOptionMacCmdReplyImmediately)) {
 					return false;
 				}
 #endif
@@ -5838,7 +5902,9 @@ bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
 			} else if (k->key() == Qt::Key_Down) {
 #ifdef Q_OS_MAC
 				// Cmd + Down is used instead of End.
-				if (HasSendText(_field)) {
+				if (HasSendText(_field)
+					&& !base::options::value<bool>(
+						HistoryView::Controls::kOptionMacCmdReplyImmediately)) {
 					return false;
 				}
 #endif
@@ -6415,7 +6481,8 @@ bool HistoryWidget::hasEnoughLinesForAi() const {
 bool HistoryWidget::textExceedsMaxSize() const {
 	return _history
 		&& !_voiceRecordBar->isActive()
-		&& _field->getLastText().size() > MaxMessageSize;
+		&& (_field->getLastText().size()
+			> Data::PremiumLimits(&session()).messageLengthCurrent());
 }
 
 void HistoryWidget::updateAiButtonVisibility() {
@@ -7165,6 +7232,7 @@ void HistoryWidget::updateControlsGeometry() {
 	updateFieldSize();
 
 	_cornerButtons.updatePositions();
+	_pullToNext->updateGeometry();
 
 	if (_membersDropdown) {
 		_membersDropdown->setMaxHeight(countMembersDropdownHeightMax());
@@ -8510,6 +8578,48 @@ void HistoryWidget::checkPinnedBarState() {
 		}
 	}, _pinnedBar->lifetime());
 
+	_pinnedBar->barRightClicks(
+	) | rpl::on_next([=] {
+		if (_pinnedBarHasCustomButton) {
+			return;
+		}
+		const auto reference = _pinnedClickedId
+			? _pinnedClickedId
+			: _pinnedTracker->currentMessageId().message;
+		if (!reference) {
+			return;
+		}
+		const auto universal = [&](FullMsgId id) {
+			return (!id || !_migrated || peerIsChannel(id.peer))
+				? id.msg
+				: (id.msg - ServerMaxMsgId);
+		};
+		const auto migrated = _migrated ? _migrated->peer.get() : nullptr;
+		const auto referenceId = universal(reference);
+		const auto top = Data::ResolveTopPinnedId(
+			_peer,
+			MsgId(0), // topicRootId
+			PeerId(0), // monoforumPeerId
+			migrated);
+		const auto targetId = (top && referenceId >= universal(top))
+			? Data::ResolveMinPinnedId(
+				_peer,
+				MsgId(0), // topicRootId
+				PeerId(0), // monoforumPeerId
+				migrated)
+			: _pinnedTracker->nextPinnedId(referenceId);
+		if (!targetId) {
+			return;
+		}
+		controller()->showPeerHistory(
+			session().data().peer(targetId.peer),
+			Window::SectionShow::Way::Forward,
+			targetId.msg);
+		_pinnedClickedId = FullMsgId();
+		_minPinnedId = std::nullopt;
+		updatePinnedViewer();
+	}, _pinnedBar->lifetime());
+
 	_pinnedBarHeight = 0;
 	_pinnedBar->heightValue(
 	) | rpl::on_next([=](int height) {
@@ -8601,6 +8711,7 @@ void HistoryWidget::refreshPinnedBarButton(bool many, HistoryItem *item) {
 	};
 	auto customButton = CreatePinnedBarCustomButton(this, item, context);
 	if (customButton) {
+		_pinnedBarHasCustomButton = true;
 		struct State {
 			base::unique_qptr<Ui::PopupMenu> menu;
 		};
@@ -8617,6 +8728,7 @@ void HistoryWidget::refreshPinnedBarButton(bool many, HistoryItem *item) {
 		_pinnedBar->setRightButton(std::move(customButton));
 		return;
 	}
+	_pinnedBarHasCustomButton = false;
 
 	const auto close = !many;
 	auto button = object_ptr<Ui::IconButton>(
@@ -8944,6 +9056,12 @@ void HistoryWidget::showInfoTooltip(
 		std::move(hiddenCallback));
 }
 
+void HistoryWidget::showHiddenSenderTooltip(
+		QRect globalArea,
+		const TextWithEntities &text) {
+	_hiddenSenderTooltip.show(_scroll.data(), globalArea, text);
+}
+
 void HistoryWidget::showPremiumStickerTooltip(
 		not_null<const HistoryView::Element*> view) {
 	if (const auto media = view->data()->media()) {
@@ -9062,10 +9180,11 @@ void HistoryWidget::checkCharsLimitation() {
 	}
 	const auto hasMediaWithCaption = item->media()
 		&& item->media()->allowsEditCaption();
-	const auto maxCaptionSize = !hasMediaWithCaption
-		? MaxMessageSize
-		: Data::PremiumLimits(&session()).captionLengthCurrent();
-	const auto remove = _fieldCharsCountManager.count() - maxCaptionSize;
+	const auto limits = Data::PremiumLimits(&session());
+	const auto maxTextSize = hasMediaWithCaption
+		? limits.captionLengthCurrent()
+		: limits.messageLengthCurrent();
+	const auto remove = _fieldCharsCountManager.count() - maxTextSize;
 	if (remove > 0) {
 		if (!_charsLimitation) {
 			_charsLimitation = base::make_unique_q<CharactersLimitLabel>(
@@ -9073,11 +9192,6 @@ void HistoryWidget::checkCharsLimitation() {
 				_send.get(),
 				style::al_bottom);
 			_charsLimitation->show();
-			Data::AmPremiumValue(
-				&session()
-			) | rpl::on_next([=] {
-				checkCharsLimitation();
-			}, _charsLimitation->lifetime());
 		}
 		_charsLimitation->setLeft(remove);
 	} else {
@@ -9265,7 +9379,12 @@ void HistoryWidget::setReplyFieldsFromProcessing() {
 void HistoryWidget::editMessage(
 		not_null<HistoryItem*> item,
 		const TextSelection &selection) {
-	if (_chooseTheme) {
+	if (item->richPage()) {
+#ifdef TDESKTOP_IV_EDITOR
+		Iv::Editor::ShowEditBox(controller(), item);
+#endif // TDESKTOP_IV_EDITOR
+		return;
+	} else if (_chooseTheme) {
 		toggleChooseChatTheme(_peer);
 	} else if (_voiceRecordBar->isActive()) {
 		controller()->showToast(tr::lng_edit_caption_voice(tr::now));
@@ -9872,14 +9991,19 @@ void HistoryWidget::updateReplyEditTexts(bool force) {
 		}
 	}
 	if (_replyEditMsg) {
+		const auto richPage = _replyEditMsg->richPage();
 		const auto editMedia = _editMsgId
 			? _replyEditMsg->media()
 			: nullptr;
-		if (_editMsgId && _replyEditMsg) {
+		if (_editMsgId && _replyEditMsg && !richPage) {
 			_mediaEditManager.start(_replyEditMsg);
+		} else {
+			_mediaEditManager.cancel();
 		}
-		_canReplaceMedia = _editMsgId && _replyEditMsg->allowsEditMedia();
-		if (editMedia && editMedia->allowsEditMedia()) {
+		_canReplaceMedia = _editMsgId
+			&& !richPage
+			&& _replyEditMsg->allowsEditMedia();
+		if (_canReplaceMedia && editMedia && editMedia->allowsEditMedia()) {
 			_canAddMedia = false;
 		} else {
 			_canAddMedia = base::take(_canReplaceMedia);

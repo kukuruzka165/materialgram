@@ -100,7 +100,10 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 				? *data.vsuggested_post()
 				: MTPSuggestedPost()),
 			MTP_int(data.vschedule_repeat_period().value_or_empty()),
-			MTP_string(qs(data.vsummary_from_language().value_or_empty())));
+			MTP_string(qs(data.vsummary_from_language().value_or_empty())),
+			(data.vrich_message()
+				? *data.vrich_message()
+				: MTPRichMessage()));
 	});
 }
 
@@ -664,12 +667,7 @@ HistoryItem *ShortcutMessages::append(
 			if (data.is_edit_hide()) {
 				existing->applyEdition(HistoryMessageEdition(_session, data));
 			} else {
-				existing->updateSentContent({
-					qs(data.vmessage()),
-					Api::EntitiesFromMTP(
-						_session,
-						data.ventities().value_or_empty())
-				}, data.vmedia());
+				existing->updateSentContent(data);
 				existing->updateReplyMarkup(
 					HistoryMessageMarkupData(data.vreply_markup()));
 				existing->updateForwardedInfo(data.vfwd_from());

@@ -252,7 +252,7 @@ mediaviewTextPalette: TextPalette(defaultTextPalette) {
 	spoilerFg: mediaviewCaptionFg;
 }
 
-mediaviewCaptionStyle: defaultTextStyle;
+mediaviewCaptionStyle: historyTextStyle;
 
 mediaviewThickFont: semiboldFont;
 mediaviewFont: normalFont;

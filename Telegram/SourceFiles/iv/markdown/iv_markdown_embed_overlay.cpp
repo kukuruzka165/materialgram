@@ -36,7 +36,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <limits>
 
@@ -44,6 +43,7 @@ namespace Iv::Markdown {
 namespace {
 
 constexpr auto kReadyRevealDelay = crl::time(1000);
+constexpr auto kHtmlRequestPrefix = "html/";
 
 [[nodiscard]] TextWithEntities GenericWebviewErrorText() {
 	return { u"Error: Could not initialize WebView."_q };
@@ -95,20 +95,20 @@ enum class LayoutMode {
 
 [[nodiscard]] bool ShowsCloseButton(
 		EmbedOverlay::Mode mode,
-		const EmbedRequest &request) {
+		const EmbedRequest &) {
 	return ShowsErrorSurface(mode)
-		|| ((mode == EmbedOverlay::Mode::EmbeddedVisible) && request.fullWidth);
+		|| (mode == EmbedOverlay::Mode::EmbeddedVisible);
 }
 
 [[nodiscard]] TextWithEntities AddFallbackAction(
 		TextWithEntities text,
-		const QString &fallbackUrl) {
-	if (fallbackUrl.isEmpty()) {
+		const QString &url) {
+	if (url.isEmpty()) {
 		return text;
 	}
 	return std::move(text).append(u"\n\n"_q).append(tr::link(
 		tr::lng_iv_open_in_browser(tr::now),
-		fallbackUrl));
+		url));
 }
 
 [[nodiscard]] int ParsePositiveInt(const QJsonValue &value) {
@@ -154,25 +154,6 @@ enum class LayoutMode {
 	return message.isObject() ? ResizeFrameHeight(message.object()) : 0;
 }
 
-[[nodiscard]] QJsonDocument NavigationReadyMessage(
-		QByteArray resourceId,
-		QString token,
-		QString url) {
-	auto object = QJsonObject{
-		{ u"event"_q, u"navigation_ready"_q },
-	};
-	if (!resourceId.isEmpty()) {
-		object.insert(u"resourceId"_q, QString::fromUtf8(resourceId));
-	}
-	if (!token.isEmpty()) {
-		object.insert(u"token"_q, token);
-	}
-	if (!url.isEmpty()) {
-		object.insert(u"url"_q, url);
-	}
-	return QJsonDocument(object);
-}
-
 [[nodiscard]] QByteArray EmbedInitScript() {
 	return QByteArray(
 		"(function(){"
@@ -185,65 +166,30 @@ enum class LayoutMode {
 		"}"
 		"}"
 		"};"
-		"if(window!==window.top){"
-		"return;"
-		"}"
-		"function resourceId(){"
-		"var path='';"
-		"try{path=String(window.location.pathname||'');}catch(e){}"
-		"while(path.charAt(0)==='/'){path=path.slice(1);}"
-		"return path;"
-		"}"
-		"function token(){"
-		"var hash='';"
-		"try{hash=String(window.location.hash||'');}catch(e){}"
-		"while(hash.charAt(0)==='#'){hash=hash.slice(1);}"
-		"return hash;"
-		"}"
-		"function url(){"
-		"try{return String(window.location.href||'');}catch(e){return '';}"
-		"}"
-		"function report(){"
-		"if(!window.external||typeof window.external.invoke!=='function'){"
-		"return;"
-		"}"
-		"try{"
-		"window.external.invoke(JSON.stringify({"
-		"event:'navigation_ready',"
-		"resourceId:resourceId(),"
-		"token:token(),"
-		"url:url()"
-		"}));"
-		"}catch(e){"
-		"}"
-		"}"
-		"if(document.readyState==='complete'){"
-		"report();"
-		"}else{"
-		"var handler=function(){"
-		"window.removeEventListener('load',handler,false);"
-		"report();"
-		"};"
-		"window.addEventListener('load',handler,false);"
-		"}"
 		"})();");
+}
+
+[[nodiscard]] QByteArray NormalizeDataRequestId(const std::string &id) {
+	auto result = QByteArray::fromStdString(id);
+	if (const auto hash = result.indexOf('#'); hash >= 0) {
+		result = result.left(hash);
+	}
+	while (result.startsWith('/')) {
+		result.remove(0, 1);
+	}
+	return result;
 }
 
 } // namespace
 
 EmbedOverlay::EmbedOverlay(
 	QWidget *parent,
-	const base::flat_map<QByteArray, QByteArray> *resources,
 	std::function<void(QString)> linkActivationCallback,
-	Webview::StorageId storageId,
-	std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
-		dataRequestHandler)
+	Webview::StorageId storageId)
 : Ui::RpWidget(parent)
 , _webviewParent(parent)
-, _resources(resources)
 , _linkActivationCallback(std::move(linkActivationCallback))
 , _storageId(std::move(storageId))
-, _dataRequestHandler(std::move(dataRequestHandler))
 , _readyDelayTimer([=] {
 	revealReadyEmbed();
 })
@@ -331,9 +277,8 @@ bool EmbedOverlay::startEmbed(
 	_request = request;
 	_preferredBodySize = QSize();
 	_pendingPreferredBodySize = QSize();
-	_readyNavigationToken = QString();
+	_htmlRequestId = htmlRequestId();
 	_cssToQtScale = 1.;
-	_readyFromResource = false;
 	_ready = false;
 	_mode = mode;
 	_loading = !UsesExternalWindow(mode);
@@ -348,8 +293,8 @@ bool EmbedOverlay::startEmbed(
 		_loadingAnimation.start();
 	}
 	_content->update();
+	const auto available = Webview::Availability();
 	if (!_webview) {
-		const auto available = Webview::Availability();
 		if (available.error != Webview::Available::Error::None) {
 			showWebviewError(Ui::BotWebView::ErrorText(available));
 			return true;
@@ -357,20 +302,15 @@ bool EmbedOverlay::startEmbed(
 	}
 	ensureWebview();
 	if (_webview && _webview->widget()) {
-		const auto hasResource = _resources
-			&& (_resources->find(request.resourceId) != _resources->end());
-		_readyFromResource = hasResource;
-		_readyNavigationToken = hasResource
-			? QString::number(++_navigationGeneration)
-			: QString();
 		updateWebviewGeometry();
-		if (hasResource) {
-			_webview->navigateToData(
-				QString::fromUtf8(request.resourceId)
-					+ u"#"_q
-					+ _readyNavigationToken);
-		} else if (!request.fallbackUrl.isEmpty()) {
-			_webview->navigate(request.fallbackUrl);
+		if (!request.html.isEmpty()) {
+			if (available.customSchemeRequests) {
+				_webview->navigateToData(QString::fromUtf8(_htmlRequestId));
+			} else {
+				showWebviewError(GenericWebviewErrorText());
+			}
+		} else if (!request.url.isEmpty()) {
+			_webview->navigate(request.url);
 		} else {
 			showWebviewError(GenericWebviewErrorText());
 		}
@@ -402,13 +342,6 @@ void EmbedOverlay::testHandleWebviewMessage(const QJsonDocument &message) {
 }
 
 void EmbedOverlay::testHandleNavigationDone(bool success) {
-	if (success && _readyFromResource) {
-		handleWebviewMessage(NavigationReadyMessage(
-			_request.resourceId,
-			_readyNavigationToken,
-			QString()));
-		return;
-	}
 	handleNavigationDone(success);
 }
 
@@ -543,9 +476,8 @@ void EmbedOverlay::resetState() {
 	_request = EmbedRequest();
 	_preferredBodySize = QSize();
 	_pendingPreferredBodySize = QSize();
-	_readyNavigationToken = QString();
+	_htmlRequestId = QByteArray();
 	_cssToQtScale = 1.;
-	_readyFromResource = false;
 	_ready = false;
 	_externalWindowCloseReported = false;
 	_showErrorOnFailure = false;
@@ -627,9 +559,6 @@ void EmbedOverlay::ensureWebview() {
 			}
 		});
 	});
-	raw->setDataRequestHandler([=](Webview::DataRequest request) {
-		return handleDataRequest(std::move(request));
-	});
 	raw->setExternalWindowCloseHandler([=] {
 		if (_webviewGeneration == generation
 			&& _webview
@@ -637,10 +566,15 @@ void EmbedOverlay::ensureWebview() {
 			_externalWindowCloseReported = true;
 		}
 	});
+	raw->setDataRequestHandler([=](Webview::DataRequest request) {
+		return handleDataRequest(std::move(request));
+	});
 	raw->init(EmbedInitScript());
 	raw->setNavigationStartHandler([=](const QString &uri, bool newWindow) {
-		if (uri == u"about:blank"_q
-			|| uri.startsWith(u"http://desktop-app-resource/"_q)) {
+		if (uri == u"about:blank"_q) {
+			return true;
+		}
+		if (!newWindow && !_ready && !uri.isEmpty()) {
 			return true;
 		}
 		if (UsesExternalWindow(_mode) && !newWindow && !uri.isEmpty()) {
@@ -682,25 +616,6 @@ void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
 	}
 	const auto object = message.object();
 	const auto event = object.value("event").toString();
-	if (event == u"navigation_ready"_q) {
-		if (!_webview || !_webview->widget()) {
-			showWebviewError();
-			return;
-		}
-		if (!_readyFromResource) {
-			return;
-		}
-		if (object.value("token").toString() != _readyNavigationToken) {
-			return;
-		}
-		if (normalizedRequestId(
-			object.value("resourceId").toString().toStdString())
-				!= _request.resourceId) {
-			return;
-		}
-		setReady();
-		return;
-	}
 	if (event != u"preferred_size"_q) {
 		return;
 	}
@@ -717,14 +632,6 @@ void EmbedOverlay::handleWebviewMessage(const QJsonDocument &message) {
 		viewportWidth = ParsePositiveInt(object.value("innerWidth"));
 	}
 	updateCssToQtScale(viewportWidth);
-	auto resourceId = object.value("resourceId").toString();
-	if (resourceId.isEmpty()) {
-		resourceId = object.value("resource_id").toString();
-	}
-	if (!resourceId.isEmpty()
-		&& normalizedRequestId(resourceId.toStdString()) != _request.resourceId) {
-		return;
-	}
 	applyPreferredBodySize(QSize(cssPixelsToQt(width), cssPixelsToQt(height)));
 }
 
@@ -741,7 +648,7 @@ void EmbedOverlay::handleNavigationDone(bool success) {
 		showWebviewError();
 		return;
 	}
-	if (!_ready && !_readyFromResource) {
+	if (!_ready) {
 		setReady();
 	}
 }
@@ -843,6 +750,11 @@ void EmbedOverlay::updateContentGeometry() {
 	const auto available = fullWidth
 		? rect().marginsRemoved({ 0, margin.top(), 0, margin.bottom() })
 		: rect().marginsRemoved(margin);
+	const auto verticalReserve = (layout != LayoutMode::ErrorSurface)
+		? std::min(
+			CloseButtonHitHeight(),
+			std::max((available.height() - 1) / 2, 0))
+		: 0;
 	if (available.isEmpty()) {
 		_contentGeometry = QRect();
 		_content->setGeometry(_contentGeometry);
@@ -857,14 +769,6 @@ void EmbedOverlay::updateContentGeometry() {
 		return;
 	}
 	const auto showClose = ShowsCloseButton(_mode, _request);
-	if (_close) {
-		if (showClose) {
-			_close->show();
-			_close->moveToRight(0, 0);
-		} else {
-			_close->hide();
-		}
-	}
 	if ((layout == LayoutMode::ErrorSurface) && _error) {
 		const auto width = std::clamp(
 			(_contentWidth > 0)
@@ -877,15 +781,8 @@ void EmbedOverlay::updateContentGeometry() {
 			available,
 			QRect(QPoint(), _error->size()));
 	} else {
-		const auto verticalReserve = fullWidth
-			? std::min(
-				CloseButtonHitHeight(),
-				std::max((available.height() - 1) / 2, 0))
-			: 0;
-		const auto embedAvailable = fullWidth
-			? available.marginsRemoved(
-				QMargins(0, verticalReserve, 0, verticalReserve))
-			: available;
+		const auto embedAvailable = available.marginsRemoved(
+			QMargins(0, verticalReserve, 0, verticalReserve));
 		const auto padding = contentPadding();
 		const auto horizontalPadding = padding.left() + padding.right();
 		const auto verticalPadding = padding.top() + padding.bottom();
@@ -928,9 +825,27 @@ void EmbedOverlay::updateContentGeometry() {
 			QRect(0, 0, width, height));
 	}
 	_content->setGeometry(_contentGeometry);
+	if (_close) {
+		if (showClose) {
+			_close->show();
+			if (layout == LayoutMode::RoundedEmbedded) {
+				_close->move(
+					std::max(
+						_contentGeometry.x()
+							+ _contentGeometry.width()
+							- _close->width(),
+						0),
+					std::max(_contentGeometry.y() - _close->height(), 0));
+			} else {
+				_close->moveToRight(0, 0);
+			}
+		} else {
+			_close->hide();
+		}
+	}
 	updateWebviewGeometry();
 	if (_error && _errorLabel) {
-		_errorLabel->setContextCopyText(_request.fallbackUrl);
+		_errorLabel->setContextCopyText(_request.url);
 		if (layout == LayoutMode::ErrorSurface) {
 			_error->moveToLeft(0, 0, _content->width());
 		} else {
@@ -1018,8 +933,6 @@ void EmbedOverlay::showWebviewError(const TextWithEntities &text) {
 	const auto failedCallback = base::take(_failedCallback);
 	const auto showError = !isHidden() || _showErrorOnFailure;
 	_showErrorOnFailure = false;
-	_readyNavigationToken = QString();
-	_readyFromResource = false;
 	if (!showError) {
 		resetState();
 		if (failedCallback) {
@@ -1053,7 +966,7 @@ void EmbedOverlay::showWebviewError(const TextWithEntities &text) {
 			return false;
 		});
 	}
-	_errorLabel->setMarkedText(AddFallbackAction(text, _request.fallbackUrl));
+	_errorLabel->setMarkedText(AddFallbackAction(text, _request.url));
 	_error->show();
 	updateContentGeometry();
 	if (failedCallback) {
@@ -1100,44 +1013,25 @@ int EmbedOverlay::cssPixelsToQt(int value) const {
 		: 0;
 }
 
-QByteArray EmbedOverlay::normalizedRequestId(const std::string &id) const {
-	auto normalized = QByteArray::fromStdString(id);
-	if (const auto pos = normalized.indexOf('#'); pos >= 0) {
-		normalized = normalized.left(pos);
-	}
-	while (normalized.startsWith('/')) {
-		normalized.remove(0, 1);
-	}
-	return normalized;
+QByteArray EmbedOverlay::htmlRequestId() {
+	return !_request.html.isEmpty()
+		? QByteArray(kHtmlRequestPrefix)
+			+ QByteArray::number(++_dataResourceGeneration)
+		: QByteArray();
 }
 
 Webview::DataResult EmbedOverlay::handleDataRequest(
 		Webview::DataRequest request) {
-	const auto id = normalizedRequestId(request.id);
-	if (_resources) {
-		if (const auto i = _resources->find(id); i != _resources->end()) {
-			request.done({
-				.stream = std::make_unique<Webview::DataStreamFromMemory>(
-					i->second,
-					"text/html; charset=utf-8"),
-			});
-			return Webview::DataResult::Done;
-		}
+	const auto id = NormalizeDataRequestId(request.id);
+	if (id != _htmlRequestId || _request.html.isEmpty()) {
+		return Webview::DataResult::Failed;
 	}
-	const auto existing = std::array<const char*, 4>{
-		"photo/",
-		"document/",
-		"map/",
-		"html/",
-	};
-	for (const auto prefix : existing) {
-		if (id.startsWith(prefix)) {
-			return _dataRequestHandler
-				? _dataRequestHandler(id, std::move(request))
-				: Webview::DataResult::Failed;
-		}
-	}
-	return Webview::DataResult::Failed;
+	request.done({
+		.stream = std::make_unique<Webview::DataStreamFromMemory>(
+			_request.html,
+			"text/html; charset=utf-8"),
+	});
+	return Webview::DataResult::Done;
 }
 
 } // namespace Iv::Markdown

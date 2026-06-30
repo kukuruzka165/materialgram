@@ -70,6 +70,9 @@ public:
 	[[nodiscard]] int captionLengthDefault() const;
 	[[nodiscard]] int captionLengthPremium() const;
 	[[nodiscard]] int captionLengthCurrent() const;
+	[[nodiscard]] int messageLengthDefault() const;
+	[[nodiscard]] int messageLengthPremium() const;
+	[[nodiscard]] int messageLengthCurrent() const;
 
 	[[nodiscard]] int uploadMaxDefault() const;
 	[[nodiscard]] int uploadMaxPremium() const;

@@ -444,6 +444,8 @@ stickersRowDuration: 200;
 stickersAddCellPlusSize: 22px;
 stickersAddCellPlusThickness: 2px;
 stickersAddCellBgRadius: 28px;
+emojiSetAddCellPlusSize: 13px;
+emojiSetAddCellBgRadius: 16px;
 
 stickersEmojiPickerExpandedRadius: 20px;
 stickersEmojiPickerBg: emojiPanBg;
@@ -915,6 +917,7 @@ reactPanelScrollRounded: ScrollArea(emojiScroll) {
 }
 selfForwardsTaggerStripSkip: 11px;
 
+toastLottieIconSize: size(20px, 20px);
 selfForwardsTaggerIconPadding: margins(14px, 2px, 8px, 2px);
 selfForwardsTaggerToast: Toast(defaultToast) {
 	minWidth: 160px;
@@ -1155,6 +1158,27 @@ historyToDownBadgeSize: 22px;
 
 historyToDownShownAfter: 480px;
 historyToDownDuration: 150;
+
+historyPullNextThreshold: 48px;
+historyPullNextExpand: 110px;
+historyPullNextMaxHeight: 150px;
+historyPullNextAvatar: 56px;
+historyPullNextSkip: 8px;
+historyPullNextArrowStroke: 2px;
+historyPullNextBadge: 20px;
+historyPullNextBadgeRing: 2px;
+historyPullNextInset: 16px;
+historyPullNextPadding: 4px;
+historyPullNextArrowSize: 24px;
+historyPullNextArrowRaise: 20px;
+historyPullNextRise: 36px;
+historyPullNextNameTop: 20px;
+historyPullNextNameRadius: 15px;
+historyPullNextHintSlide: 10px;
+historyPullNextBounce: 4px;
+historyPullNextBadgeFont: font(12px semibold);
+historyPullNextNameFont: font(13px semibold);
+historyPullNextHintFont: font(14px);
 
 dialogsToUpAbove: icon {{ "history_down_arrow-flip_vertical", windowBgActive, point(0px, 1px) }};
 dialogsToUpAboveOver: icon {{ "history_down_arrow-flip_vertical", windowBgActive, point(0px, 1px) }};

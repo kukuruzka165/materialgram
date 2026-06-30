@@ -8,7 +8,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/object_ptr.h"
-#include "ui/rect_part.h"
 
 namespace Ui {
 class VerticalLayout;
@@ -18,24 +17,9 @@ class RpWidget;
 
 namespace Info::Profile {
 
-struct SectionSeparator {
-	enum class Kind { None, Plain, Text };
-	Kind kind = Kind::None;
-	rpl::producer<TextWithEntities> text;
-	Fn<void(not_null<Ui::FlatLabel*>)> textSetup;
-
-	[[nodiscard]] static SectionSeparator None();
-	[[nodiscard]] static SectionSeparator Plain();
-	[[nodiscard]] static SectionSeparator Text(
-		rpl::producer<TextWithEntities> text,
-		Fn<void(not_null<Ui::FlatLabel*>)> setup = nullptr);
-};
-
 struct Section {
 	object_ptr<Ui::RpWidget> widget = { nullptr };
 	rpl::producer<bool> shown;
-	SectionSeparator trailing;
-	bool embedsLeadingSeparator = false;
 };
 
 class SectionStack final {
@@ -44,30 +28,34 @@ public:
 
 	void add(Section section);
 	void addPlainSeparator();
+	void addTextSeparator(
+		rpl::producer<TextWithEntities> text,
+		rpl::producer<bool> shown,
+		Fn<void(not_null<Ui::FlatLabel*>)> setup = nullptr);
 	void finalize();
 
-	[[nodiscard]] int count() const;
 	[[nodiscard]] not_null<Ui::VerticalLayout*> layout() const;
 
 private:
-	[[nodiscard]] rpl::producer<bool> nextVisibleIsNonEmbedding(
-		int afterIndex) const;
-	[[nodiscard]] rpl::producer<bool> anyShownAtOrBefore(int index) const;
-	[[nodiscard]] rpl::producer<bool> anyShownAfter(int index) const;
-	[[nodiscard]] rpl::producer<bool> anyShownInRange(
-		int from,
-		int toInclusive) const;
-	[[nodiscard]] rpl::producer<bool> computePlainMarkerCandidate(
-		int position) const;
-	void addPlainMarkerSlot(
-		int markerIndex,
-		not_null<std::vector<rpl::variable<bool>>*> candidates,
-		rpl::producer<bool> textVisible);
-	void addTextSeparatorSlot(int sectionIndex, SectionSeparator &trailing);
+	enum class RowType {
+		Block,
+		PlainSeparator,
+		TextSeparator,
+	};
+	struct Row {
+		RowType type = RowType::Block;
+		object_ptr<Ui::RpWidget> widget = { nullptr };
+		rpl::producer<bool> shown;
+		rpl::producer<TextWithEntities> text;
+		Fn<void(not_null<Ui::FlatLabel*>)> textSetup;
+	};
+
+	[[nodiscard]] static std::vector<bool> ComputeVisibility(
+		const std::vector<RowType> &kinds,
+		const std::vector<bool> &intrinsic);
 
 	const not_null<Ui::VerticalLayout*> _layout;
-	std::vector<Section> _sections;
-	std::vector<int> _plainMarkerAfter;
+	std::vector<Row> _rows;
 	bool _finalized = false;
 
 };

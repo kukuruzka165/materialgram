@@ -270,7 +270,8 @@ QByteArray Settings::serialize() const {
 		size += Serialize::bytearraySize(key)
 			+ Serialize::bytearraySize(value);
 	}
-	size += sizeof(qint32); // _audioPlaybackSpeed
+	size += sizeof(qint32) // _audioPlaybackSpeed
+		+ sizeof(qint32); // _mediaGridZoomStep
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -448,6 +449,7 @@ QByteArray Settings::serialize() const {
 			stream << key << value;
 		}
 		stream << qint32(SerializePlaybackSpeed(_audioPlaybackSpeed.current()));
+		stream << qint32(_mediaGridZoomStep);
 	}
 
 	Ensures(result.size() == size);
@@ -978,6 +980,13 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 		stream >> speed;
 		if (stream.status() == QDataStream::Ok) {
 			audioPlaybackSpeed = speed;
+		}
+	}
+	if (!stream.atEnd()) {
+		auto step = qint32();
+		stream >> step;
+		if (stream.status() == QDataStream::Ok) {
+			_mediaGridZoomStep = step;
 		}
 	}
 	if (stream.status() != QDataStream::Ok) {

@@ -23,11 +23,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QVariant>
 
 namespace Ui {
+class ChatStyle;
+class ChatTheme;
 class PopupMenu;
 namespace Text {
 struct QuotePaintCache;
 } // namespace Text
 } // namespace Ui
+
+class QTouchEvent;
+class QWheelEvent;
 
 namespace Iv::Markdown {
 
@@ -47,11 +52,13 @@ public:
 		QVariant context,
 		std::shared_ptr<QVariant> contextRef = nullptr);
 	void setArticle(std::shared_ptr<MarkdownArticle> article);
+	void articleContentChanged();
 	void setZoom(int value);
 	void refreshPalette();
 	void invalidateRasterCache();
 	[[nodiscard]] int maxWidth() const;
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
+	[[nodiscard]] bool expandDetailsToAnchor(const QString &anchorId);
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 	[[nodiscard]] int lastRelayoutMs() const;
 	int resizeGetHeight(int newWidth) override;
@@ -68,12 +75,14 @@ protected:
 	void visibleTopBottomUpdated(int visibleTop, int visibleBottom) override;
 	void keyPressEvent(QKeyEvent *e) override;
 	void contextMenuEvent(QContextMenuEvent *e) override;
+	void wheelEvent(QWheelEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseDoubleClickEvent(QMouseEvent *e) override;
 	void focusOutEvent(QFocusEvent *e) override;
 	void focusInEvent(QFocusEvent *e) override;
+	bool eventHook(QEvent *e) override;
 	void leaveEventHook(QEvent *e) override;
 	void clickHandlerActiveChanged(const ClickHandlerPtr &, bool) override;
 	void clickHandlerPressedChanged(const ClickHandlerPtr &, bool) override;
@@ -104,6 +113,7 @@ private:
 	[[nodiscard]] QVariant viewerToastClickHandlerContext() const;
 	void showToast(const QString &text) const;
 	void copySelectedText();
+	void copyCodeBlock(const MarkdownArticleHitTestResult &state);
 
 	void syncArticleVisibleTopBottom();
 	void relayoutCurrentWidth(bool clearSelection);
@@ -116,7 +126,8 @@ private:
 	[[nodiscard]] QRect articleRectToWidget(QRect articleRect) const;
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensurePrePaintCache();
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensureBlockquotePaintCache();
-	[[nodiscard]] MarkdownArticlePaintCaches textPaintCaches();
+	[[nodiscard]] MarkdownArticlePaintContext textPaintContext(QRect clip);
+	void touchEvent(QTouchEvent *e);
 	void stopPressedPlaceholderRipple();
 	void dragActionStart(QPoint point, Qt::MouseButton button);
 	MarkdownArticleHitTestResult dragActionUpdate(QPoint point);
@@ -127,6 +138,9 @@ private:
 	[[nodiscard]] double zoomScale() const;
 
 	std::shared_ptr<MarkdownArticle> _article;
+	std::shared_ptr<MarkdownArticle> _retainedArticle;
+	std::unique_ptr<Ui::ChatTheme> _theme;
+	std::unique_ptr<Ui::ChatStyle> _style;
 	std::vector<Ui::Text::SpecialColor> _highlightColors;
 	std::unique_ptr<Ui::Text::QuotePaintCache> _prePaintCache;
 	std::unique_ptr<Ui::Text::QuotePaintCache> _blockquotePaintCache;
@@ -152,7 +166,12 @@ private:
 	int _lastRelayoutMs = 0;
 	int _zoom = 100;
 	Ui::VisibleRange _visibleRange;
+	std::optional<Qt::Orientation> _horizontalScrollLock;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
+	bool _activeHorizontalScrollDrag = false;
+	bool _articlePainted = false;
+	bool _activeTouchHorizontalScroll = false;
+	std::optional<QPoint> _pendingTouchHorizontalScrollPoint;
 
 };
 

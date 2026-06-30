@@ -99,6 +99,7 @@ private:
 
 	int _savedScrollTop = 0;
 	bool _restoreScrollPending = false;
+	bool _wasAtBottom = false;
 };
 
 } // namespace Ui

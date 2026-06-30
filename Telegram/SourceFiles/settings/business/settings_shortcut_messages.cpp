@@ -1230,10 +1230,11 @@ void ShortcutMessages::edit(
 	const auto hasMediaWithCaption = item
 		&& item->media()
 		&& item->media()->allowsEditCaption();
-	const auto maxCaptionSize = !hasMediaWithCaption
-		? MaxMessageSize
-		: Data::PremiumLimits(_session).captionLengthCurrent();
-	if (!TextUtilities::CutPart(sending, left, maxCaptionSize)
+	const auto limits = Data::PremiumLimits(_session);
+	const auto maxTextSize = hasMediaWithCaption
+		? limits.captionLengthCurrent()
+		: limits.messageLengthCurrent();
+	if (!TextUtilities::CutPart(sending, left, maxTextSize)
 		&& !hasMediaWithCaption) {
 		if (item) {
 			_controller->show(Box<DeleteMessagesBox>(item));
@@ -1242,7 +1243,7 @@ void ShortcutMessages::edit(
 		}
 		return;
 	} else if (!left.text.isEmpty()) {
-		const auto remove = originalLeftSize - maxCaptionSize;
+		const auto remove = originalLeftSize - maxTextSize;
 		_controller->showToast(
 			tr::lng_edit_limit_reached(tr::now, lt_count, remove));
 		return;

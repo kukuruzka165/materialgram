@@ -547,6 +547,7 @@ private:
 	bool _canAddMedia = false;
 
 	std::unique_ptr<Controls::WebpageProcessor> _preview;
+	bool _previewShown = false;
 
 	rpl::lifetime _historyLifetime;
 	rpl::lifetime _uploaderSubscriptions;

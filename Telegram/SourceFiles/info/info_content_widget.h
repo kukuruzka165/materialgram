@@ -151,6 +151,9 @@ public:
 	virtual void saveChanges(FnMut<void()> done);
 	[[nodiscard]] virtual SendMenu::Details sendMenuDetails() const;
 	virtual bool processChosenSticker(ChatHelpers::FileChosen &&chosen);
+	virtual bool processZoomKey(not_null<QKeyEvent*> e) {
+		return false;
+	}
 
 	[[nodiscard]] int scrollBottomSkip() const;
 	[[nodiscard]] rpl::producer<int> scrollBottomSkipValue() const;
@@ -193,6 +196,10 @@ protected:
 
 	void setScrollTopSkip(int scrollTopSkip);
 	void setScrollBottomSkip(int scrollBottomSkip);
+	void setInnerTopReserve(int reserve);
+	void setupFlexibleRegularScroll(
+		not_null<Ui::RpWidget*> inner,
+		not_null<Ui::RpWidget*> pinnedToTop);
 	int scrollTopSave() const;
 	void scrollTopRestore(int scrollTop);
 	void scrollTo(const Ui::ScrollToRequest &request);
@@ -227,6 +234,7 @@ private:
 	base::unique_qptr<Ui::RpWidget> _searchWrap = nullptr;
 	QPointer<Ui::InputField> _searchField;
 	int _innerDesiredHeight = 0;
+	int _innerTopReserve = 0;
 	int _additionalScroll = 0;
 	int _addedHeight = 0;
 	int _maxVisibleHeight = 0;

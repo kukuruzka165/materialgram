@@ -117,6 +117,7 @@ public:
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &params) override;
 	bool showBackFromStackInternal(const Window::SectionShow &params);
+	bool closeByBackButton();
 	void removeFromStack(const std::vector<Section> &sections);
 	std::shared_ptr<Window::SectionMemento> createMemento() override;
 	[[nodiscard]] SendMenu::Details sendMenuDetails() const override;

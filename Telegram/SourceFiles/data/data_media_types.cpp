@@ -2349,7 +2349,9 @@ ItemPreview MediaPoll::toPreview(ToPreviewOptions options) const {
 		: Dialogs::Ui::DialogsPreviewText(options.translated
 			? parent()->translatedText()
 			: parent()->originalText());
-	const auto type = u"\xD83D\xDCCA "_q + _poll->question.text;
+	const auto type = Ui::Text::IconEmoji(
+		&st::dialogsMiniPollIcon
+	).append(_poll->question.text);
 	return {
 		.text = WithCaptionNotificationText(type, caption),
 	};

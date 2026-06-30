@@ -427,6 +427,11 @@ infoProfileTopBarActionButtonIconTop: 6px;
 infoProfileTopBarActionButtonTextTop: infoProfileTopBarActionButtonIconSize + infoProfileTopBarActionButtonIconTop + 1px;
 infoProfileTopBarActionButtonTextSkip: 4px;
 infoProfileTopBarActionButtonFont: font(11px);
+infoProfileTopBarActionButtonShadow: BoxShadow {
+	blurRadius: 1px;
+	offset: point(0px, 0px);
+	opacity: 0.25;
+}
 
 infoProfileTopBarActionButtonsPadding: margins(18px, 0px, 18px, 16px);
 infoProfileTopBarActionButtonsHeight: infoProfileTopBarActionButtonSize + infoProfileTopBarActionButtonsPadding.topBottom;
@@ -449,6 +454,7 @@ infoProfileTopBarActionReport: icon{{ "profile/report-23x23", windowBoldFg }};
 infoProfileTopBarActionLeave: icon{{ "profile/leave-23x23", windowBoldFg }};
 infoProfileTopBarActionMore: icon{{ "profile/profile_more", windowBoldFg }};
 infoProfileTopBarActionManage: icon{{ "profile/profile_manage", windowBoldFg }};
+infoProfileTopBarActionLiveStream: icon{{ "profile/live_stream-23x23", windowBoldFg }};
 
 infoProfileTopBarTopicStatusButton: RoundButton(defaultTableSmallButton) {
 	radius: 4px;
@@ -728,7 +734,6 @@ infoMainButtonAttention: SettingsButton(infoMainButton) {
 	textFgOver: attentionButtonFgOver;
 }
 infoSharedMediaButton: infoProfileButton;
-infoSharedMediaBottomSkip: 12px;
 
 infoBlockButton: SettingsButton(infoProfileButton) {
 	textFg: attentionButtonFg;
@@ -812,6 +817,7 @@ infoMediaSkip: 2px;
 infoMediaLeft: 3px;
 infoMediaMargin: margins(0px, 6px, 0px, 2px);
 infoMediaMinGridSize: 82px;
+infoMediaGridSizeStep: 16px;
 
 infoCommonGroupsMargin: margins(0px, 2px, 0px, 2px);
 infoCommonGroupsListItem: PeerListItem(defaultPeerListItem) {

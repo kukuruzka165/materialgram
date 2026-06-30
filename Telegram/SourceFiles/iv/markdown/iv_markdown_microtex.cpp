@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QPainter>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <exception>
 #include <limits>
@@ -92,8 +93,45 @@ struct ParsedMicrotexFormula {
 	return true;
 }
 
+// MicroTeX lays the outer alignment environments (align, gather, equation,
+// ...) out to the full text width we pass as the render width cap, and
+// TeXRender::getWidth() adds insets on top, so their measured width always
+// lands a couple of units above the cap and the logical-size-cap check
+// below rejects them no matter the content. Their inner variants (aligned,
+// gathered, ...) produce the same rows at natural width, which also fits
+// chat bubbles better than a forced full-width block.
+[[nodiscard]] QString RewriteFullWidthEnvironments(QString tex) {
+	if (!tex.contains(u"\\begin{"_q)) {
+		return tex;
+	}
+	static const auto kRewrites = std::array<std::pair<QString, QString>, 12>{{
+		{ u"align*"_q, u"aligned"_q },
+		{ u"align"_q, u"aligned"_q },
+		{ u"flalign*"_q, u"aligned"_q },
+		{ u"flalign"_q, u"aligned"_q },
+		{ u"alignat*"_q, u"alignedat"_q },
+		{ u"alignat"_q, u"alignedat"_q },
+		{ u"gather*"_q, u"gathered"_q },
+		{ u"gather"_q, u"gathered"_q },
+		{ u"multline*"_q, u"gathered"_q },
+		{ u"multline"_q, u"gathered"_q },
+		// MicroTeX expands equation to align, so it is full-width too.
+		{ u"equation*"_q, u"gathered"_q },
+		{ u"equation"_q, u"gathered"_q },
+	}};
+	for (const auto &[from, to] : kRewrites) {
+		tex.replace(
+			u"\\begin{"_q + from + u'}',
+			u"\\begin{"_q + to + u'}');
+		tex.replace(
+			u"\\end{"_q + from + u'}',
+			u"\\end{"_q + to + u'}');
+	}
+	return tex;
+}
+
 [[nodiscard]] QString PreparedTeX(MathKind kind, const QString &trimmedTex) {
-	auto result = trimmedTex;
+	auto result = RewriteFullWidthEnvironments(trimmedTex);
 	if (kind == MathKind::Display) {
 		result = u"\\displaystyle "_q + result;
 	}
@@ -253,6 +291,15 @@ void FinalizeFailure(MeasuredFormula *result) {
 		const auto logicalSize = result.measured.logicalSize;
 		if (logicalSize.width() <= 0 || logicalSize.height() <= 0) {
 			result.measured.error = u"invalid-render-size"_q;
+			return result;
+		}
+		// In partial mode MicroTeX swallows parse errors inside arguments
+		// (e.g. of \displaystyle) and renders an EmptyAtom, which measures
+		// 1x1 scaled units. Fall back to the source text instead of
+		// painting an invisible formula.
+		const auto scaledSize = result.measured.exact.scaledSize;
+		if (scaledSize.width() <= 1 && scaledSize.height() <= 1) {
+			result.measured.error = u"empty-render"_q;
 			return result;
 		}
 		if (logicalSize.width() > request.renderWidthCap

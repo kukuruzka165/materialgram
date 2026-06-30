@@ -19,10 +19,22 @@ namespace Iv::Markdown {
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	std::vector<LaidOutBlock> *blocks,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
 	LayoutContext context);
+[[nodiscard]] std::optional<int> RecountLaidOutBlocks(
+	const std::vector<PreparedBlock> &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	std::vector<LaidOutBlock> *blocks,
+	const style::Markdown &st,
+	int left,
+	int top,
+	int width,
+	LayoutContext context);
+[[nodiscard]] int ArticleContentMaxRight(
+	const std::vector<LaidOutBlock> &blocks,
+	const style::Markdown &st);
 
 } // namespace Iv::Markdown

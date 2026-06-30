@@ -169,6 +169,9 @@ private:
 	[[nodiscard]] QMargins innerMargin() const;
 	[[nodiscard]] int bottomInfoPadding() const;
 	[[nodiscard]] bool isLogEntryOriginal() const;
+	[[nodiscard]] bool hasLogEntryPreview() const;
+	[[nodiscard]] Ui::Text::GeometryDescriptor logEntryGeometry(
+		int width) const;
 
 	[[nodiscard]] ClickHandlerPtr replaceAttachLink(
 		const ClickHandlerPtr &link) const;
@@ -193,6 +196,7 @@ private:
 
 	std::vector<std::unique_ptr<Data::Media>> _collage;
 	ClickHandlerPtr _openl;
+	ClickHandlerPtr _previewLink;
 	std::unique_ptr<Media> _attach;
 	mutable std::shared_ptr<Data::PhotoMedia> _photoMedia;
 	mutable std::unique_ptr<Ui::RippleAnimation> _ripple;
@@ -200,9 +204,10 @@ private:
 	int _dataVersion = -1;
 	int _siteNameLines = 0;
 	int _descriptionLines = 0;
-	uint32 _titleLines : 30 = 0;
+	uint32 _titleLines : 29 = 0;
 	uint32 _asArticle : 1 = 0;
 	uint32 _composeToneListening : 1 = 0;
+	uint32 _hasLogEntryPreview : 1 = 0;
 
 	Ui::Text::String _siteName;
 	Ui::Text::String _title;
@@ -215,6 +220,7 @@ private:
 	mutable QPoint _lastPoint;
 	int _pixw = 0;
 	int _pixh = 0;
+	int _logPreviewDescHeight = 0;
 
 	std::unique_ptr<AdditionalData> _additionalData;
 

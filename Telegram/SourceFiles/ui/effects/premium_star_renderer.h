@@ -41,6 +41,7 @@ public:
 	};
 	void setState(State state);
 	void setColors(QColor gradient1, QColor gradient2);
+	void setGolden(bool golden);
 
 	void initialize(
 		QRhi *rhi,
@@ -76,6 +77,7 @@ private:
 
 	int _vertexCount = 0;
 	State _state;
+	bool _golden = false;
 	std::array<float, 3> _gradient1 = { { 1.f, 1.f, 1.f } };
 	std::array<float, 3> _gradient2 = { { 0.8902f, 0.9255f, 0.9804f } };
 

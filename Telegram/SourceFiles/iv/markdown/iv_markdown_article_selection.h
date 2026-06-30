@@ -40,16 +40,6 @@ struct SelectableSegment {
 	}
 };
 
-struct PaintSelectionState {
-	const std::vector<SelectableSegment> *segments = nullptr;
-	MarkdownArticleSelection selection;
-	const MarkdownArticleSelectionEndpoints *endpoints = nullptr;
-
-	[[nodiscard]] bool empty() const {
-		return !segments || selection.empty();
-	}
-};
-
 struct LogicalVisibleRange {
 	int top = 0;
 	int bottom = 0;
@@ -67,6 +57,12 @@ struct SegmentSpan {
 void CollectSelectableSegments(
 	std::vector<LaidOutBlock> *blocks,
 	std::vector<SelectableSegment> *segments);
+void RefreshScrollableSegmentRects(
+	const std::vector<LaidOutBlock> &blocks,
+	std::vector<SelectableSegment> *segments);
+void RefreshScrollableSegmentRects(
+	const LaidOutBlock &block,
+	std::vector<SelectableSegment> *segments);
 void CollectAnchors(
 	const std::vector<LaidOutBlock> &blocks,
 	std::vector<std::pair<QString, int>> *anchors);
@@ -74,6 +70,12 @@ void CollectAnchors(
 	const std::vector<SelectableSegment> *segments,
 	int index);
 [[nodiscard]] int SegmentLength(const SelectableSegment &segment);
+[[nodiscard]] const style::TextStyle &TextStyleForSegment(
+	const SelectableSegment &segment,
+	const style::Markdown &st);
+[[nodiscard]] style::color TextColorForSegment(
+	const SelectableSegment &segment,
+	const style::Markdown &st);
 [[nodiscard]] std::optional<TextSelection> TextSelectionForSegment(
 	const SelectableSegment &segment,
 	const PaintSelectionState &selectionState);
@@ -89,12 +91,25 @@ void CollectAnchors(
 [[nodiscard]] bool TableSegmentSelected(
 	const PaintSelectionState &selectionState,
 	int tableSegmentIndex);
+[[nodiscard]] bool StructuralBlockSelected(
+	const PaintSelectionState &selectionState,
+	const PreparedEditBlockSource &source);
+[[nodiscard]] bool StructuralListItemSelected(
+	const PaintSelectionState &selectionState,
+	const PreparedEditListItemSource &source);
+[[nodiscard]] bool StructuralTableRowSelected(
+	const PaintSelectionState &selectionState,
+	const PreparedEditTableRowSource &source);
+[[nodiscard]] bool StructuralTableCellSelected(
+	const PaintSelectionState &selectionState,
+	const PreparedEditTableCellSource &source);
 [[nodiscard]] TextForMimeData TextForSegment(
 	const SelectableSegment &segment,
 	TextSelection selection = AllTextSelection);
 [[nodiscard]] TextForMimeData TextForSelectedSegments(
 	const std::vector<SelectableSegment> &segments,
 	MarkdownArticleSelection selection,
-	const MarkdownArticleSelectionEndpoints *endpoints);
+	const MarkdownArticleSelectionEndpoints *endpoints,
+	const PreparedEditSelection *structuralSelection = nullptr);
 
 } // namespace Iv::Markdown

@@ -9,8 +9,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "iv/markdown/iv_markdown_article_selection.h"
 
+class QColor;
+
 namespace Iv::Markdown {
 
+struct MarkdownArticlePaintContext;
+
+[[nodiscard]] QColor NonPullquoteQuoteCaptionColor(
+	const MarkdownArticlePaintContext &context,
+	const style::Markdown &st);
 void PaintBlocks(
 	Painter &p,
 	const std::vector<LaidOutBlock> &blocks,
@@ -19,9 +26,7 @@ void PaintBlocks(
 	MathRenderer *renderer,
 	int devicePixelRatio,
 	int outerWidth,
-	const style::Markdown &markdown,
-	const MarkdownArticlePaintCaches &caches,
-	const PaintSelectionState &selectionState,
-	QRect clip);
+	const style::Markdown &st,
+	const MarkdownArticlePaintContext &context);
 
 } // namespace Iv::Markdown

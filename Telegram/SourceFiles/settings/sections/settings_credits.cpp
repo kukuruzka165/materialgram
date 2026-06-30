@@ -51,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/text/custom_emoji_instance.h"
 #include "ui/text/format_values.h"
+#include "ui/text/text_custom_emoji.h"
 #include "ui/text/text_utilities.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
@@ -138,7 +139,6 @@ private:
 	base::unique_qptr<Ui::IconButton> _close;
 	rpl::variable<bool> _backToggles;
 	rpl::variable<Info::Wrap> _wrap;
-	Fn<void(bool)> _setPaused;
 
 	rpl::event_stream<> _showBack;
 	rpl::event_stream<> _showFinished;
@@ -572,7 +572,7 @@ void Credits::setupContent() {
 	auto context = [&]() -> Ui::Text::MarkedContext {
 		const auto height = textSt.style.font->height;
 		auto customEmojiFactory = [=](const auto &...) {
-			return std::make_unique<Ui::Text::ShiftedEmoji>(
+			return Ui::Text::MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
 				isCurrency
 					? std::make_unique<Ui::CustomEmoji::Internal>(
 						u"currency_icon:%1"_q.arg(height),
@@ -698,12 +698,17 @@ base::weak_qptr<Ui::RpWidget> Credits::createPinnedToTop(
 					: tr::lng_credits_summary_about)(
 						TextWithEntities::Simple),
 				.light = true,
+				.use3dStar = !isCurrency,
+				.star3dGolden = !isCurrency,
+				.use3dDiamond = isCurrency,
 				.gradientStops = Ui::Premium::CreditsIconGradientStops(),
+				.showFinished = _showFinished.events(),
 			});
 	}();
-	_setPaused = [=](bool paused) {
-		content->setPaused(paused);
-	};
+	controller()->boxShownValue(
+	) | rpl::on_next([=](bool shown) {
+		content->setPaused(shown);
+	}, content->lifetime());
 
 	_wrap.value(
 	) | rpl::on_next([=](Info::Wrap wrap) {

@@ -68,6 +68,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webrtc/webrtc_audio_input_tester.h"
 #include "webrtc/webrtc_create_adm.h"
 #include "styles/style_calls.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
 
 #include <QtWidgets/QApplication>
@@ -1425,9 +1426,15 @@ void Panel::createPinOnTop() {
 				pin ? &st::groupCallPinnedOnTop : nullptr,
 				pin ? &st::groupCallPinnedOnTop : nullptr);
 			if (!_pinOnTop->isHidden()) {
-				uiShow()->showToast({ pin
-					? tr::lng_group_call_pinned_on_top(tr::now)
-					: tr::lng_group_call_unpinned_on_top(tr::now) });
+				uiShow()->showToast({
+					.text = { pin
+						? tr::lng_group_call_pinned_on_top(tr::now)
+						: tr::lng_group_call_unpinned_on_top(tr::now) },
+					.iconLottie = pin
+						? u"toast/pin"_q
+						: u"toast/unpin"_q,
+					.iconLottieSize = st::toastLottieIconSize,
+				});
 			}
 		}
 	};
@@ -2945,13 +2952,11 @@ void Panel::paint(QRect clip) {
 bool Panel::handleClose() {
 	if (_call) {
 		window()->hide();
-#ifdef Q_OS_LINUX
 		if (Platform::IsWayland()) {
 			if (const auto handle = window()->windowHandle()) {
 				handle->destroy();
 			}
 		}
-#endif // Q_OS_LINUX
 		return true;
 	}
 	return false;

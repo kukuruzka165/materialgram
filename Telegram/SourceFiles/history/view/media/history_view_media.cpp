@@ -482,7 +482,9 @@ void Media::setupSpoilerTag(std::unique_ptr<MediaSpoilerTag> &tag) const {
 	}
 	const auto media = parent()->data()->media();
 	const auto invoice = media ? media->invoice() : nullptr;
-	if (const auto price = invoice->isPaidMedia ? invoice->amount : 0) {
+	if (const auto price = (invoice && invoice->isPaidMedia)
+		? invoice->amount
+		: 0) {
 		tag = std::make_unique<MediaSpoilerTag>();
 		tag->price = price;
 	}

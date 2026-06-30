@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
+#include "data/data_web_page.h"
 #include "base/call_delayed.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
@@ -493,6 +494,10 @@ MTPInputMedia PollMediaToMTP(const PollMedia &media) {
 				MTP_double(media.geo->lat()),
 				MTP_double(media.geo->lon()),
 				MTPint())); // accuracy_radius
+	} else if (!media.url.isEmpty()) {
+		return MTP_inputMediaWebPage(
+			MTP_flags(MTPDinputMediaWebPage::Flag::f_optional),
+			MTP_string(media.url));
 	}
 	return MTPInputMedia();
 }
@@ -525,6 +530,20 @@ PollMedia PollMediaFromMTP(
 			result.geo = Data::LocationPoint(point);
 		}, [](const MTPDgeoPointEmpty &) {
 		});
+	}, [&](const MTPDmessageMediaWebPage &data) {
+		data.vwebpage().match([&](const MTPDwebPage &page) {
+			result.webpage = owner->processWebpage(page);
+		}, [&](const MTPDwebPagePending &page) {
+			result.webpage = owner->processWebpage(page);
+		}, [&](const MTPDwebPageEmpty &page) {
+			if (const auto url = page.vurl()) {
+				result.url = qs(*url);
+			}
+		}, [&](const MTPDwebPageNotModified &page) {
+		});
+		if (result.webpage && !result.webpage->url.isEmpty()) {
+			result.url = result.webpage->url;
+		}
 	}, [](const auto &) {
 	});
 	return result;
@@ -552,6 +571,8 @@ PollMedia PollMediaFromInputMTP(
 				Data::LocationPoint::NoAccessHash);
 		}, [](const auto &) {
 		});
+	}, [&](const MTPDinputMediaWebPage &data) {
+		result.url = qs(data.vurl());
 	}, [](const auto &) {
 	});
 	return result;

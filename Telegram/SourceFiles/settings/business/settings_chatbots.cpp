@@ -478,6 +478,7 @@ void AppendUsersFromPeerList(
 				finish();
 			}).send();
 			data->searchRequestId = session->api().request(MTPcontacts_Search(
+				MTP_flags(0),
 				MTP_string(extracted),
 				MTP_int(SearchPeopleLimit)
 			)).done([=](const MTPcontacts_Found &result) {

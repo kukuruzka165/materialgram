@@ -9,13 +9,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
 
-#include <QtCore/QVector>
-
 namespace Iv::Markdown {
 
+struct NativeIvPreparedLeafFormulaRange {
+	int from = 0;
+	int till = 0;
+};
+
 [[nodiscard]] bool PrepareNativeIvBlocks(
-	const QVector<MTPPageBlock> &blocks,
+	const Iv::RichPage &page,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
+[[nodiscard]] NativeInstantViewLeafUpdateResult UpdatePreparedNativeIvLeaf(
+	std::vector<PreparedBlock> *blocks,
+	const Iv::RichPage &page,
+	const PreparedEditLeafSource &source,
+	NativeIvPrepareState *state,
+	NativeIvPreparedLeafFormulaRange *formulaRange);
 
 } // namespace Iv::Markdown

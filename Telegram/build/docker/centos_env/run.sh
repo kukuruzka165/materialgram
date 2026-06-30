@@ -17,4 +17,9 @@ if [ "$#" == "0" ]; then
   set -- bash
 fi
 
-docker run -it --rm --cpus=8 --memory=22g -u $(id -u) -v $HOME/Telegram/DesktopPrivate:/usr/src/DesktopPrivate -v $HOME/Telegram/tdesktop:/usr/src/tdesktop tdesktop:centos_env "$@"
+CpuCount=$(nproc)
+DockerCpus=$((CpuCount > 4 ? CpuCount - 2 : CpuCount))
+MemTotalGb=$(($(grep MemTotal /proc/meminfo | awk '{print $2}') / 1048576))
+DockerMemoryGb=$((MemTotalGb > 12 ? MemTotalGb - 4 : MemTotalGb))
+
+docker run -it --rm --cpus=$DockerCpus --memory=${DockerMemoryGb}g -u $(id -u) -v $HOME/Telegram/DesktopPrivate:/usr/src/DesktopPrivate -v $HOME/Telegram/tdesktop:/usr/src/tdesktop tdesktop:centos_env "$@"

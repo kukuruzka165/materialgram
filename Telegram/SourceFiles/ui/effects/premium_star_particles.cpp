@@ -8,16 +8,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/premium_star_particles.h"
 
 #include "base/algorithm.h"
+#include "ui/effects/animation_value.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/style/style_core.h"
 
 #include <QtMath>
+#include <QtSvg/QSvgRenderer>
 
 namespace Ui::Premium {
 namespace {
 
 constexpr auto kParticleCount = 100;
+constexpr auto kGlyphParticleCount = 75;
+constexpr auto kDollarParticleCount = 60;
+constexpr auto kDollarSpawnChance = 0.13; // Share of particles that are coins.
+constexpr auto kDollarSpeedScale = 2.5; // Coins fly outward faster than stars.
+constexpr auto kDollarLifeScale = 2.5; // ...and live longer, for longer trails.
+constexpr auto kDollarSpawnRadiusFactor = 0.2; // Coins start near the center.
+constexpr auto kDollarFlipPerSecond = 1.1; // Horizontal coin-flip frequency.
+constexpr auto kDollarSpriteAlpha = 255;
 constexpr auto kIdleLimit = 5;
 constexpr auto kMinDelta = crl::time(4);
 constexpr auto kMaxDelta = crl::time(50);
@@ -49,7 +59,8 @@ constexpr auto kFlingSpeedLow = 5.;
 constexpr auto kFlingSpeedMedium = 9.;
 constexpr auto kFlingSpeedHigh = 15.;
 
-constexpr auto kSizesDp = std::array{ 4., 12., 10. };
+constexpr auto kSizesDp = std::array{ 3., 8., 7. };
+constexpr auto kDollarSizesDp = std::array{ 16., 8., 7. };
 constexpr auto kRotationDegPerSec = std::array{ 9., 7.2, 6. };
 
 [[nodiscard]] QPainterPath StarPath(float64 size) {
@@ -92,10 +103,23 @@ StarParticles::StarParticles(Fn<void(const QRect &)> update)
 }
 
 void StarParticles::setColor(QColor color) {
-	if (_color == color) {
+	setColors(color, color);
+}
+
+void StarParticles::setColors(QColor color1, QColor color2) {
+	if (_color1 == color1 && _color2 == color2) {
 		return;
 	}
-	_color = color;
+	_color1 = color1;
+	_color2 = color2;
+	_spritesDirty = true;
+}
+
+void StarParticles::setGlyph(Glyph glyph) {
+	if (_glyph == glyph) {
+		return;
+	}
+	_glyph = glyph;
 	_spritesDirty = true;
 }
 
@@ -162,17 +186,34 @@ void StarParticles::updateSpeedScale(crl::time now) {
 }
 
 void StarParticles::createParticle(crl::time now, Particle &particle) {
+	if (_glyph == Glyph::Dollar) {
+		const auto roll = base::RandomIndex(kRadiusResolution, _random)
+			/ float64(kRadiusResolution);
+		particle.sizeIndex = (roll < kDollarSpawnChance)
+			? 0
+			: (1 + base::RandomIndex(int(_sprites.size()) - 1, _random));
+	} else {
+		particle.sizeIndex = base::RandomIndex(int(_sprites.size()), _random);
+	}
+	const auto dollar = (_glyph == Glyph::Dollar) && (particle.sizeIndex == 0);
 	particle.radiusFactor = base::RandomIndex(kRadiusResolution, _random)
 		/ float64(kRadiusResolution);
+	if (dollar) {
+		particle.radiusFactor *= kDollarSpawnRadiusFactor;
+	}
 	particle.angle = base::RandomIndex(kAngleSteps, _random)
 		* kDegreesToRadians;
 	particle.alpha = (kAlphaBasePercent
 		+ base::RandomIndex(kAlphaRangePercent, _random)) / 100.;
-	particle.sizeIndex = base::RandomIndex(int(_sprites.size()), _random);
+	particle.colorIndex = base::RandomIndex(kColorSteps, _random);
+	particle.flipProgress = dollar
+		? (base::RandomIndex(kRadiusResolution, _random)
+			* 2. / kRadiusResolution)
+		: 0.;
 	particle.birthTime = now;
+	const auto life = kLifeMin + base::RandomIndex(kLifeRand, _random);
 	particle.deathTime = now
-		+ kLifeMin
-		+ base::RandomIndex(kLifeRand, _random);
+		+ (dollar ? crl::time(life * kDollarLifeScale) : life);
 	particle.distance = 0.;
 }
 
@@ -182,7 +223,11 @@ void StarParticles::ensureParticles() {
 	}
 	const auto now = crl::now();
 	const auto perMs = driftStep(crl::time(1));
-	_particles.resize(kParticleCount);
+	_particles.resize((_glyph == Glyph::Dollar)
+		? kDollarParticleCount
+		: (_glyph == Glyph::Star)
+		? kGlyphParticleCount
+		: kParticleCount);
 	for (auto &particle : _particles) {
 		createParticle(now, particle);
 		const auto life = particle.deathTime - particle.birthTime;
@@ -207,12 +252,19 @@ void StarParticles::tick(crl::time now) {
 		: std::min(_field.width(), _field.height()) / 2.;
 	const auto bound = radius * kBoundsFactor;
 	const auto step = driftStep(delta) * _speedScale;
+	const auto flipStep = (delta / kMsPerSecond)
+		* kDollarFlipPerSecond
+		* _speedScale;
 	for (auto &particle : _particles) {
 		if (now >= particle.deathTime) {
 			createParticle(now, particle);
 			continue;
 		}
-		particle.distance += step;
+		const auto dollar = (_glyph == Glyph::Dollar) && (particle.sizeIndex == 0);
+		particle.distance += dollar ? (step * kDollarSpeedScale) : step;
+		if (dollar) {
+			particle.flipProgress += flipStep;
+		}
 		if (radius > 0.
 			&& (particle.radiusFactor * radius + particle.distance) > bound) {
 			createParticle(now, particle);
@@ -239,13 +291,7 @@ void StarParticles::rebuildSprites(int ratio) {
 	_spritesRatio = ratio;
 	const auto round = style::ConvertScale(kRoundDp) * ratio;
 	const auto pad = int(base::SafeRound(round)) + ratio;
-	auto fill = _color;
-	fill.setAlpha(kSpriteAlpha);
-	_maxSpriteExtent = 0.;
-	for (auto i = 0; i != int(_sprites.size()); ++i) {
-		const auto side = std::max(
-			1,
-			int(base::SafeRound(style::ConvertScale(kSizesDp[i]) * ratio)));
+	const auto bakePath = [&](int side, QColor fill) {
 		const auto full = side + 2 * pad;
 		auto image = QImage(full, full, QImage::Format_ARGB32_Premultiplied);
 		image.fill(Qt::transparent);
@@ -275,17 +321,64 @@ void StarParticles::rebuildSprites(int ratio) {
 			Qt::IgnoreAspectRatio,
 			Qt::SmoothTransformation);
 		image.setDevicePixelRatio(ratio);
-		const auto extent = full / float64(ratio);
-		_sprites[i] = Sprite{
+		return Sprite{
 			.image = std::move(image),
-			.size = Size(extent),
+			.size = Size(full / float64(ratio)),
 		};
-		_maxSpriteExtent = std::max(_maxSpriteExtent, extent);
+	};
+	auto glyph = (_glyph == Glyph::Dollar)
+		? std::make_unique<QSvgRenderer>(
+			u":/gui/icons/settings/premium_dollar.svg"_q)
+		: (_glyph == Glyph::Star)
+		? std::make_unique<QSvgRenderer>(u":/gui/icons/settings/star.svg"_q)
+		: nullptr;
+	const auto bakeGlyph = [&](int side, QColor fill) {
+		const auto full = side + 2 * pad;
+		auto image = QImage(full, full, QImage::Format_ARGB32_Premultiplied);
+		image.fill(Qt::transparent);
+		{
+			auto p = QPainter(&image);
+			glyph->render(&p, QRectF(pad, pad, side, side));
+			p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+			p.fillRect(QRectF(0, 0, full, full), fill);
+		}
+		image.setDevicePixelRatio(ratio);
+		return Sprite{
+			.image = std::move(image),
+			.size = Size(full / float64(ratio)),
+		};
+	};
+	const auto sizes = (_glyph == Glyph::Dollar)
+		? kDollarSizesDp
+		: (_glyph == Glyph::Star)
+		? std::array<float64, 3>{ { 8., 9., 10. } }
+		: kSizesDp;
+	_maxSpriteExtent = 0.;
+	for (auto i = 0; i != int(_sprites.size()); ++i) {
+		const auto side = std::max(
+			1,
+			int(base::SafeRound(style::ConvertScale(sizes[i]) * ratio)));
+		const auto useGlyph = (glyph != nullptr) && (i == 0);
+		for (auto j = 0; j != kColorSteps; ++j) {
+			const auto t = (kColorSteps > 1)
+				? (j / float64(kColorSteps - 1))
+				: 0.;
+			auto fill = anim::color(_color1, _color2, t);
+			fill.setAlpha((useGlyph && (_glyph == Glyph::Dollar))
+				? kDollarSpriteAlpha
+				: kSpriteAlpha);
+			_sprites[i][j] = useGlyph
+				? bakeGlyph(side, fill)
+				: bakePath(side, fill);
+		}
+		_maxSpriteExtent = std::max(
+			_maxSpriteExtent,
+			_sprites[i][0].size.width());
 	}
 }
 
 void StarParticles::paint(QPainter &p, const QRectF &field) {
-	if (!_color.isValid() || field.isEmpty()) {
+	if (!_color1.isValid() || field.isEmpty()) {
 		return;
 	}
 	ensureParticles();
@@ -321,21 +414,36 @@ void StarParticles::paint(QPainter &p, const QRectF &field) {
 		const auto alpha = particle.alpha * fade;
 		const auto radial = particle.radiusFactor * radius
 			+ particle.distance;
-		const auto theta = particle.angle + _fieldAngle[particle.sizeIndex];
+		const auto theta = particle.angle
+			+ ((_glyph == Glyph::Dollar)
+				? 0.
+				: _fieldAngle[particle.sizeIndex]);
 		const auto position = QPointF(
 			center.x() + radial * std::cos(theta),
 			center.y() + radial * std::sin(theta));
-		const auto &sprite = _sprites[particle.sizeIndex];
+		const auto &sprite
+			= _sprites[particle.sizeIndex][particle.colorIndex];
 		const auto width = sprite.size.width() * scale;
 		const auto height = sprite.size.height() * scale;
 		p.setOpacity(baseOpacity * alpha);
-		p.drawImage(
-			QRectF(
-				position.x() - width / 2.,
-				position.y() - height / 2.,
-				width,
-				height),
-			sprite.image);
+		if ((_glyph == Glyph::Dollar) && (particle.sizeIndex == 0)) {
+			const auto flip = std::cos(M_PI * particle.flipProgress);
+			p.save();
+			p.translate(position);
+			p.scale(flip, 1.);
+			p.drawImage(
+				QRectF(-width / 2., -height / 2., width, height),
+				sprite.image);
+			p.restore();
+		} else {
+			p.drawImage(
+				QRectF(
+					position.x() - width / 2.,
+					position.y() - height / 2.,
+					width,
+					height),
+				sprite.image);
+		}
 	}
 	p.setOpacity(baseOpacity);
 }

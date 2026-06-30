@@ -109,7 +109,6 @@ void TopBarActionButton::setLottieColor(const style::color *color) {
 void TopBarActionButton::setStyle(const TopBarActionButtonStyle &style) {
 	_bgColor = style.bgColor;
 	_fgColor = style.fgColor;
-	_shadowColor = style.shadowColor;
 	update();
 }
 
@@ -124,7 +123,6 @@ void TopBarActionButton::paintEvent(QPaintEvent *e) {
 	p.setBrush(_bgColor);
 	{
 		auto hq = PainterHighQualityEnabler(p);
-		// Todo shadows.
 		p.drawRoundedRect(rect(), st::boxRadius, st::boxRadius);
 	}
 

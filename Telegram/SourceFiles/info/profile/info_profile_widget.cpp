@@ -96,15 +96,24 @@ Widget::Widget(
 	not_null<Controller*> controller,
 	Origin origin)
 : ContentWidget(parent, controller)
-, _inner(
-	setupFlexibleInnerWidget(
+, _inner(UseClassicProfileScroll()
+	? setupFlexibleInnerWidget(
 		object_ptr<InnerWidget>(this, controller, origin),
-		_flexibleScroll))
+		_flexibleScroll)
+	: setInnerWidget(
+		object_ptr<InnerWidget>(this, controller, origin)))
 , _pinnedToTop(_inner->createPinnedToTop(this))
 , _pinnedToBottom(_inner->createPinnedToBottom(this)) {
 	controller->setSearchEnabledByContent(false);
 
-	_inner->move(0, 0);
+	const auto classic = UseClassicProfileScroll();
+	const auto flexible = _pinnedToTop
+		&& _pinnedToTop->minimumHeight()
+		&& _inner->hasFlexibleTopBar();
+	if (classic) {
+		_inner->move(0, 0);
+	}
+
 	_inner->scrollToRequests(
 	) | rpl::on_next([this](Ui::ScrollToRequest request) {
 		if (request.ymin < 0) {
@@ -119,7 +128,9 @@ Widget::Widget(
 		checkBeforeClose([=] { controller->showBackFromStack(); });
 	}, _inner->lifetime());
 
-	if (_pinnedToTop) {
+	if (!classic && flexible) {
+		setupFlexibleRegularScroll(_inner, _pinnedToTop.get());
+	} else if (_pinnedToTop) {
 		_inner->widthValue(
 		) | rpl::on_next([=](int w) {
 			_pinnedToTop->resizeToWidth(w);
@@ -130,6 +141,20 @@ Widget::Widget(
 		) | rpl::on_next([=](int h) {
 			setScrollTopSkip(h);
 		}, _pinnedToTop->lifetime());
+	}
+
+	if (classic && flexible) {
+		_flexibleScrollHelper = std::make_unique<FlexibleScrollHelper>(
+			scroll(),
+			_inner,
+			_pinnedToTop.get(),
+			[=](QMargins margins) {
+				ContentWidget::setPaintPadding(std::move(margins));
+			},
+			[=](rpl::producer<not_null<QEvent*>> &&events) {
+				ContentWidget::setViewport(std::move(events));
+			},
+			_flexibleScroll);
 	}
 
 	if (_pinnedToBottom) {
@@ -149,22 +174,6 @@ Widget::Widget(
 			_pinnedToBottom->heightValue(),
 			heightValue()
 		) | rpl::on_next(processHeight, _pinnedToBottom->lifetime());
-	}
-
-	if (_pinnedToTop
-		&& _pinnedToTop->minimumHeight()
-		&& _inner->hasFlexibleTopBar()) {
-		_flexibleScrollHelper = std::make_unique<FlexibleScrollHelper>(
-			scroll(),
-			_inner,
-			_pinnedToTop.get(),
-			[=](QMargins margins) {
-				ContentWidget::setPaintPadding(std::move(margins));
-			},
-			[=](rpl::producer<not_null<QEvent*>> &&events) {
-				ContentWidget::setViewport(std::move(events));
-			},
-			_flexibleScroll);
 	}
 }
 

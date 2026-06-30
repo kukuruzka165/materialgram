@@ -120,6 +120,9 @@ public:
 	[[nodiscard]] Storage::Domain &domainLocal() const;
 
 	[[nodiscard]] AppConfig &appConfig() const;
+	[[nodiscard]] bool messagePrimaryEditedDate() const {
+		return _messagePrimaryEditedDate;
+	}
 
 	[[nodiscard]] bool premium() const;
 	[[nodiscard]] bool premiumPossible() const;
@@ -344,6 +347,7 @@ private:
 
 	std::shared_ptr<QImage> _selfUserpicView;
 	rpl::variable<bool> _premiumPossible = false;
+	bool _messagePrimaryEditedDate = false;
 
 	rpl::event_stream<bool> _termsLockChanges;
 	std::unique_ptr<Window::TermsLock> _termsLock;

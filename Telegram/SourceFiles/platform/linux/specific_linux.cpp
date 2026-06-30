@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "core/application.h"
 #include "core/update_checker.h"
+#include "core/version.h"
 #include "data/data_location.h"
 #include "window/window_controller.h"
 #include "webview/platform/linux/webview_linux_webkitgtk.h"
@@ -469,7 +470,10 @@ void InstallLauncher() {
 		"DESKTOPINTEGRATION");
 
 	// don't update desktop file for alpha version or if updater is disabled
-	if (cAlphaVersion() || Core::UpdaterDisabled() || DisabledByEnv) {
+	if (cAlphaVersion()
+			|| Core::UpdaterDisabled()
+			|| KSandbox::isInside()
+			|| DisabledByEnv) {
 		return;
 	}
 

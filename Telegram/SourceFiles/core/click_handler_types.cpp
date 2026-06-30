@@ -232,17 +232,30 @@ bool UrlRequiresConfirmation(const QUrl &url) {
 }
 
 QString HiddenUrlClickHandler::copyToClipboardText() const {
-	return url().startsWith(u"internal:url:"_q)
-		? url().mid(u"internal:url:"_q.size())
-		: url();
+	const auto original = originalUrl();
+	const auto originalExternal = UrlClickHandler::ExternalUrlFromInternalUrl(
+		original);
+	if (!originalExternal.isEmpty()) {
+		return originalExternal;
+	}
+	const auto value = url();
+	const auto external = UrlClickHandler::ExternalUrlFromInternalUrl(value);
+	return external.isEmpty() ? value : external;
 }
 
 QString HiddenUrlClickHandler::copyToClipboardContextItemText() const {
-	return url().isEmpty()
+	const auto original = originalUrl();
+	const auto originalExternal = UrlClickHandler::ExternalUrlFromInternalUrl(
+		original);
+	const auto value = originalExternal.isEmpty() ? url() : original;
+	const auto external = originalExternal.isEmpty()
+		? UrlClickHandler::ExternalUrlFromInternalUrl(value)
+		: originalExternal;
+	return value.isEmpty()
 		? QString()
-		: !url().startsWith(u"internal:"_q)
+		: !value.startsWith(u"internal:"_q)
 		? UrlClickHandler::copyToClipboardContextItemText()
-		: url().startsWith(u"internal:url:"_q)
+		: !external.isEmpty()
 		? UrlClickHandler::copyToClipboardContextItemText()
 		: QString();
 }
@@ -253,6 +266,10 @@ QString HiddenUrlClickHandler::dragText() const {
 }
 
 void HiddenUrlClickHandler::Open(QString url, QVariant context) {
+	if (const auto external = UrlClickHandler::ExternalUrlFromInternalUrl(url);
+			!external.isEmpty()) {
+		url = external;
+	}
 	url = Core::TryConvertUrlToLocal(url);
 	if (Core::InternalPassportOrOAuthLink(url)) {
 		return;
@@ -427,7 +444,13 @@ void BotGameUrlClickHandler::onClick(ClickContext context) const {
 }
 
 auto HiddenUrlClickHandler::getTextEntity() const -> TextEntity {
-	return { EntityType::CustomUrl, url() };
+	const auto original = originalUrl();
+	return {
+		EntityType::CustomUrl,
+		UrlClickHandler::ExternalUrlFromInternalUrl(original).isEmpty()
+			? url()
+			: original
+	};
 }
 
 QString MentionClickHandler::copyToClipboardContextItemText() const {
@@ -567,7 +590,11 @@ void MonospaceClickHandler::onClick(ClickContext context) const {
 	}
 	const auto my = context.other.value<ClickHandlerContext>();
 	if (const auto controller = my.sessionWindow.get()) {
-		controller->showToast(tr::lng_text_copied(tr::now));
+		controller->showToast({
+			.text = { tr::lng_text_copied(tr::now) },
+			.iconLottie = u"toast/copy"_q,
+			.iconLottieSize = st::toastLottieIconSize,
+		});
 	}
 	TextUtilities::SetClipboardText(TextForMimeData::Simple(_text.trimmed()));
 }
@@ -610,7 +637,11 @@ void FormattedDateClickHandler::onClick(ClickContext context) const {
 				base::unixtime::parse(date),
 				QLocale::LongFormat);
 			TextUtilities::SetClipboardText(TextForMimeData::Simple(text));
-			show->showToast(tr::lng_date_copied(tr::now));
+			show->showToast({
+				.text = { tr::lng_date_copied(tr::now) },
+				.iconLottie = u"toast/copy"_q,
+				.iconLottieSize = st::toastLottieIconSize,
+			});
 		},
 		&st::menuIconCopy);
 

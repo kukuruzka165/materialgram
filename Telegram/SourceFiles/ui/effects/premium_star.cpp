@@ -8,20 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/premium_star.h"
 
 #include "ui/effects/premium_star_renderer.h"
-#include "ui/gl/gl_detection.h"
+#include "ui/effects/premium_3d_support.h"
 #include "ui/gl/gl_surface.h"
-#include "ui/power_saving.h"
 #include "base/call_delayed.h"
 #include "base/random.h"
-#include "base/debug_log.h"
-#include "base/platform/base_platform_info.h"
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-#include <rhi/qrhi.h>
-#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
-#include <QtGui/QOffscreenSurface>
-#include <QtGui/QSurfaceFormat>
-#endif // !Q_OS_MAC && !Q_OS_WIN
+#include <QRhiWidget>
 #endif // Qt >= 6.7
 
 namespace Ui::Premium {
@@ -39,90 +32,6 @@ constexpr auto kEnterYaw = -180.;
 constexpr auto kBackDuration = crl::time(600);
 constexpr auto kIdleDelay = crl::time(2000);
 constexpr auto kOvershootTension = 2.;
-constexpr auto kBezierIterations = 40;
-constexpr auto kBezierEpsilon = 0.00001;
-
-[[nodiscard]] float64 CubicBezier(
-		float64 x1,
-		float64 y1,
-		float64 x2,
-		float64 y2,
-		float64 x) {
-	const auto curve = [](float64 t, float64 a, float64 b) {
-		return (((1. - 3. * b + 3. * a) * t
-			+ (3. * b - 6. * a)) * t
-			+ (3. * a)) * t;
-	};
-	if (x <= 0.) {
-		return 0.;
-	} else if (x >= 1.) {
-		return 1.;
-	}
-	auto start = 0.;
-	auto end = 1.;
-	auto t = x;
-	for (auto i = 0; i != kBezierIterations; ++i) {
-		t = (start + end) / 2.;
-		const auto estimate = curve(t, x1, x2);
-		if (std::abs(x - estimate) < kBezierEpsilon) {
-			break;
-		} else if (estimate < x) {
-			start = t;
-		} else {
-			end = t;
-		}
-	}
-	return curve(t, y1, y2);
-}
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-[[nodiscard]] bool ProbeGraphicsSupport() {
-	auto rhi = std::unique_ptr<QRhi>();
-#ifdef Q_OS_MAC
-	if (::Platform::MetalSupported()) {
-		auto params = QRhiMetalInitParams();
-		rhi.reset(QRhi::create(QRhi::Metal, &params));
-	}
-	if (!rhi) {
-		LOG(("PremiumStar: probe failed — no Metal RHI"));
-		return false;
-	}
-#elif defined(Q_OS_WIN)
-	auto params = QRhiD3D11InitParams();
-	rhi.reset(QRhi::create(QRhi::D3D11, &params));
-	if (!rhi) {
-		LOG(("PremiumStar: probe failed — no D3D11 RHI"));
-		return false;
-	}
-#else
-	auto format = QSurfaceFormat::defaultFormat();
-	auto offscreen = std::unique_ptr<QOffscreenSurface>(
-		QRhiGles2InitParams::newFallbackSurface(format));
-	if (!offscreen) {
-		LOG(("PremiumStar: probe failed — no offscreen surface"));
-		return false;
-	}
-	auto params = QRhiGles2InitParams();
-	params.format = format;
-	params.fallbackSurface = offscreen.get();
-	rhi.reset(QRhi::create(QRhi::OpenGLES2, &params));
-	if (!rhi) {
-		LOG(("PremiumStar: probe failed — no GL RHI"));
-		return false;
-	}
-#endif
-	LOG(("PremiumStar: probe backend=%1 device=%2"
-		).arg(rhi->backendName()
-		).arg(rhi->driverInfo().deviceName));
-	rhi.reset();
-	return true;
-}
-
-[[nodiscard]] bool RhiGraphicsSupportedCached() {
-	static const auto cached = ProbeGraphicsSupport();
-	return cached;
-}
-#endif // Qt >= 6.7
 
 } // namespace
 
@@ -134,17 +43,7 @@ Star::Star(QWidget *parent)
 Star::~Star() = default;
 
 bool Star::Supported() {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (PowerSaving::On(PowerSaving::kAnimations)) {
-		return false;
-	}
-	if (!GL::WidgetsRhiEnabled()) {
-		return false;
-	}
-	return RhiGraphicsSupportedCached();
-#else
-	return false;
-#endif
+	return Object3dSupported();
 }
 
 void Star::setColors(QColor gradient1, QColor gradient2) {
@@ -153,6 +52,15 @@ void Star::setColors(QColor gradient1, QColor gradient2) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 	if (_renderer) {
 		_renderer->setColors(_gradient1, _gradient2);
+	}
+#endif
+}
+
+void Star::setGolden(bool golden) {
+	_golden = golden;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (_renderer) {
+		_renderer->setGolden(_golden);
 	}
 #endif
 }
@@ -177,8 +85,48 @@ void Star::setPaused(bool paused) {
 	}
 	_paused = paused;
 	if (_paused) {
-		stopAnimation();
-	} else if (!isHidden()) {
+		freeze();
+	} else {
+		unfreeze();
+	}
+}
+
+void Star::freeze() {
+	stopAnimation();
+	_pausedAt = crl::now();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	const auto w = surfaceWidget();
+	if (!w || w->isHidden()) {
+		return;
+	}
+	const auto rhi = qobject_cast<QRhiWidget*>(w);
+	auto image = rhi ? rhi->grabFramebuffer() : QImage();
+	if (image.isNull()) {
+		return;
+	}
+	_frozen = std::move(image);
+	pushState();
+	w->update();
+	update();
+#endif // Qt >= 6.7
+}
+
+void Star::unfreeze() {
+	if (!_frozen.isNull()) {
+		_frozen = QImage();
+		update();
+	}
+	if (_pausedAt) {
+		const auto delta = crl::now() - _pausedAt;
+		if (_gesture) {
+			_gesture->start += delta;
+		}
+		if (_idleAt) {
+			_idleAt += delta;
+		}
+		_pausedAt = 0;
+	}
+	if (!isHidden()) {
 		startAnimation();
 	}
 }
@@ -198,6 +146,7 @@ void Star::ensureSurface() {
 	}
 	auto renderer = std::make_unique<StarRenderer>();
 	_renderer = renderer.get();
+	_renderer->setGolden(_golden);
 	if (_gradient1.isValid() && _gradient2.isValid()) {
 		_renderer->setColors(_gradient1, _gradient2);
 	}
@@ -316,7 +265,7 @@ void Star::pushState() {
 			.pitch = float(_pitch),
 			.bob = float(_bob),
 			.shimmer = float(_shimmer),
-			.alpha = float(_fadeIn * _opacity),
+			.alpha = _paused ? 0.f : float(_fadeIn * _opacity),
 		});
 	}
 #endif // Qt >= 6.7
@@ -505,6 +454,14 @@ void Star::sleepGesture() {
 	play(std::move(gesture));
 }
 
+void Star::paintEvent(QPaintEvent *e) {
+	if (_frozen.isNull()) {
+		return;
+	}
+	auto p = QPainter(this);
+	p.drawImage(rect(), _frozen);
+}
+
 void Star::resizeEvent(QResizeEvent *e) {
 	if (const auto w = surfaceWidget()) {
 		w->setGeometry(rect());
@@ -512,6 +469,10 @@ void Star::resizeEvent(QResizeEvent *e) {
 }
 
 void Star::startEnter() {
+	if (_entered) {
+		return;
+	}
+	_entered = true;
 	base::call_delayed(kEnterDelay, this, [=] {
 		if (isHidden()) {
 			return;
@@ -528,6 +489,13 @@ void Star::startEnter() {
 
 void Star::showEvent(QShowEvent *e) {
 	ensureSurface();
+	if (_entered) {
+		if (const auto w = surfaceWidget()) {
+			w->show();
+		}
+		startAnimation();
+		return;
+	}
 	_yaw = kEnterYaw;
 	_pitch = _bob = 0.;
 	_gesture.reset();
@@ -540,6 +508,9 @@ void Star::showEvent(QShowEvent *e) {
 
 void Star::hideEvent(QHideEvent *e) {
 	stopAnimation();
+	if (_entered) {
+		return;
+	}
 	_gesture.reset();
 	cancelIdle();
 	_yaw = _pitch = _bob = 0.;

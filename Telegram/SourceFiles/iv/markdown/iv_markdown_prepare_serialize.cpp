@@ -106,25 +106,33 @@ std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
 	return std::nullopt;
 }
 
+QString InlineFormulaCopySource(const QString &source) {
+	return u"$"_q + source + u"$"_q;
+}
+
 MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions() {
+	return CaptureMarkdownPrepareDimensions(st::defaultMarkdown);
+}
+
+MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions(
+		const style::Markdown &st) {
 	auto result = MarkdownPrepareDimensions();
-	const auto &markdown = st::defaultMarkdown;
-	result.bodyTextSize = TextSizeForFormula(markdown.body);
+	result.bodyTextSize = TextSizeForFormula(st.body);
 	result.headingTextSizes = {
-		TextSizeForFormula(markdown.heading1),
-		TextSizeForFormula(markdown.heading2),
-		TextSizeForFormula(markdown.heading3),
-		TextSizeForFormula(markdown.heading4),
-		TextSizeForFormula(markdown.heading5),
-		TextSizeForFormula(markdown.heading6),
+		TextSizeForFormula(st.heading1),
+		TextSizeForFormula(st.heading2),
+		TextSizeForFormula(st.heading3),
+		TextSizeForFormula(st.heading4),
+		TextSizeForFormula(st.heading5),
+		TextSizeForFormula(st.heading6),
 	};
 	result.tableHeaderTextSize = TextSizeForFormula(
-		st::defaultTable.defaultLabel.style);
+		st.table.headerStyle);
 	result.tableBodyTextSize = TextSizeForFormula(
-		st::defaultTable.defaultValue.style);
-	result.displayMathTextSize = markdown.displayMath.textSize;
-	result.displayMathMaxRenderWidth = markdown.displayMath.maxRenderWidth;
-	result.displayMathMaxRenderHeight = markdown.displayMath.maxRenderHeight;
+		st.table.bodyStyle);
+	result.displayMathTextSize = st.displayMath.textSize;
+	result.displayMathMaxRenderWidth = st.displayMath.maxRenderWidth;
+	result.displayMathMaxRenderHeight = st.displayMath.maxRenderHeight;
 	return result;
 }
 

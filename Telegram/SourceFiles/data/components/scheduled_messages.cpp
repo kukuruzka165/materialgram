@@ -104,7 +104,10 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 				? *data.vsuggested_post()
 				: MTPSuggestedPost()),
 			MTP_int(data.vschedule_repeat_period().value_or_empty()),
-			MTP_string(qs(data.vsummary_from_language().value_or_empty())));
+			MTP_string(qs(data.vsummary_from_language().value_or_empty())),
+			(data.vrich_message()
+				? *data.vrich_message()
+				: MTPRichMessage()));
 	});
 }
 
@@ -284,7 +287,8 @@ void ScheduledMessages::sendNowSimpleMessage(
 			MTPlong(), // paid_message_stars
 			MTPSuggestedPost(),
 			MTPint(), // schedule_repeat_period
-			MTPstring()), // summary_from_language
+			MTPstring(), // summary_from_language
+			MTPRichMessage()),
 		localFlags,
 		NewMessageType::Unread);
 
@@ -334,10 +338,7 @@ void ScheduledMessages::checkEntitiesAndUpdate(const MTPDmessage &data) {
 	const auto existing = j->second;
 	if (!HasScheduledDate(existing)) {
 		// Destroy a local message, that should be in history.
-		existing->updateSentContent({
-			qs(data.vmessage()),
-			Api::EntitiesFromMTP(_session, data.ventities().value_or_empty())
-		}, data.vmedia());
+		existing->updateSentContent(data);
 		existing->updateReplyMarkup(
 			HistoryMessageMarkupData(data.vreply_markup()));
 		existing->updateForwardedInfo(data.vfwd_from());
@@ -554,12 +555,7 @@ HistoryItem *ScheduledMessages::append(
 			if (data.is_edit_hide()) {
 				existing->applyEdition(HistoryMessageEdition(_session, data));
 			} else {
-				existing->updateSentContent({
-					qs(data.vmessage()),
-					Api::EntitiesFromMTP(
-						_session,
-						data.ventities().value_or_empty())
-				}, data.vmedia());
+				existing->updateSentContent(data);
 				existing->updateReplyMarkup(
 					HistoryMessageMarkupData(data.vreply_markup()));
 				existing->updateForwardedInfo(data.vfwd_from());

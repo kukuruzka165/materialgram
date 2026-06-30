@@ -24,7 +24,7 @@ photoEditorContentMargins: margins(
 	photoEditorControlsBottomSkip,
 	photoEditorControlsHeight);
 
-photoEditorBarAnimationDuration: 200;
+photoEditorBarAnimationDuration: 100;
 
 photoEditorButtonIconFg: mediaviewPipControlsFg;
 photoEditorButtonIconFgOver: mediaviewPipControlsFgOver;

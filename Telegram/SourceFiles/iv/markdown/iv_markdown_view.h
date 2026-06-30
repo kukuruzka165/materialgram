@@ -29,10 +29,22 @@ namespace Iv::Markdown {
 	std::shared_ptr<MathRenderer> renderer,
 	Fn<void(Event)> callback,
 	const OpenOptions &options = {});
+bool UpdateMarkdownPreviewWidget(
+	Ui::RpWidget *preview,
+	MarkdownArticleContent content,
+	const OpenOptions &options);
+enum class MarkdownPreviewScrollMode {
+	Instant,
+	Animated,
+};
 bool ScrollMarkdownPreviewToAnchor(
 	Ui::RpWidget *preview,
-	const QString &anchorId);
-void ScrollMarkdownPreviewToY(Ui::RpWidget *preview, int top);
+	const QString &anchorId,
+	MarkdownPreviewScrollMode mode = MarkdownPreviewScrollMode::Instant);
+void ScrollMarkdownPreviewToY(
+	Ui::RpWidget *preview,
+	int top,
+	MarkdownPreviewScrollMode mode = MarkdownPreviewScrollMode::Instant);
 [[nodiscard]] int MarkdownPreviewScrollTop(Ui::RpWidget *preview);
 [[nodiscard]] rpl::producer<int> MarkdownPreviewScrollTopValue(
 	Ui::RpWidget *preview);

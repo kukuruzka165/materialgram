@@ -18,17 +18,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <functional>
 #include <memory>
 
+#include "ui/text/text.h"
 #include "webview/webview_common.h"
 
 namespace Ui {
 class DynamicImage;
 class Show;
 } // namespace Ui
-
-namespace Webview {
-enum class DataResult;
-struct DataRequest;
-} // namespace Webview
 
 namespace Iv {
 class Delegate;
@@ -108,6 +104,7 @@ struct PreparedPhotoBlockData;
 struct PreparedVideoBlockData;
 struct PreparedAudioBlockData;
 struct PreparedMapBlockData;
+struct PreparedGroupedMediaBlockData;
 
 class HostedMediaBlockFactory {
 public:
@@ -129,12 +126,18 @@ public:
 		const PreparedMapBlockData &prepared) const {
 		return nullptr;
 	}
+	[[nodiscard]] virtual std::shared_ptr<MediaBlock> createGroupedMedia(
+		const PreparedGroupedMediaBlockData &prepared) const {
+		return nullptr;
+	}
 };
 
 class MediaRuntime {
 public:
 	virtual ~MediaRuntime() = default;
 
+	[[nodiscard]] virtual Ui::Text::MarkedContext textContext() const;
+	[[nodiscard]] virtual QString mentionNameEntityData(uint64 userId) const;
 	[[nodiscard]] virtual std::shared_ptr<Ui::DynamicImage> resolveInlineImage(
 		uint64 documentId,
 		QSize size) const = 0;
@@ -142,6 +145,12 @@ public:
 		uint64 photoId) const = 0;
 	[[nodiscard]] virtual std::shared_ptr<DocumentRuntime> resolveDocument(
 		uint64 documentId) const;
+	virtual void registerPhoto(
+		uint64 photoId,
+		TextWithEntities caption = {}) const;
+	virtual void registerDocument(
+		uint64 documentId,
+		TextWithEntities caption = {}) const;
 	[[nodiscard]] virtual std::shared_ptr<MapRuntime> resolveMap(
 		double latitude,
 		double longitude,
@@ -156,9 +165,23 @@ public:
 	hostedMediaBlockFactory() const;
 };
 
+inline Ui::Text::MarkedContext MediaRuntime::textContext() const {
+	return {};
+}
+
+inline QString MediaRuntime::mentionNameEntityData(uint64) const {
+	return QString();
+}
+
 inline std::shared_ptr<DocumentRuntime> MediaRuntime::resolveDocument(
 		uint64) const {
 	return nullptr;
+}
+
+inline void MediaRuntime::registerPhoto(uint64, TextWithEntities) const {
+}
+
+inline void MediaRuntime::registerDocument(uint64, TextWithEntities) const {
 }
 
 inline std::shared_ptr<MapRuntime> MediaRuntime::resolveMap(
@@ -196,8 +219,8 @@ enum class MediaActivationKind {
 };
 
 struct EmbedRequest {
-	QByteArray resourceId;
-	QString fallbackUrl;
+	QByteArray html;
+	QString url;
 	int width = 0;
 	int height = 0;
 	bool fullWidth = false;
@@ -205,7 +228,7 @@ struct EmbedRequest {
 	bool allowScrolling = false;
 
 	[[nodiscard]] explicit operator bool() const {
-		return !resourceId.isEmpty();
+		return !html.isEmpty() || !url.isEmpty();
 	}
 };
 
@@ -237,9 +260,6 @@ struct OpenOptions {
 	std::shared_ptr<QVariant> clickHandlerContextRef;
 	std::function<void()> openSource;
 	std::function<void(std::shared_ptr<Ui::Show>)> share;
-	std::function<Webview::DataResult(
-		QByteArray,
-		Webview::DataRequest)> ivWebviewDataRequest;
 	Webview::StorageId ivWebviewStorageId;
 	std::function<bool(
 		const MediaActivation &,
@@ -261,6 +281,7 @@ struct Event {
 		Quit,
 		OpenPage,
 		OpenFile,
+		Report,
 	};
 	Type type = Type::Close;
 	uint64 webpageId = 0;

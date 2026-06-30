@@ -276,6 +276,10 @@ void PreviewWrap::showForwardSelector(Data::ResolvedForwardDraft draft) {
 	};
 	const auto wasViews = base::take(_views);
 	using Options = Data::ForwardOptions;
+	draft.options = NormalizeForwardOptions(
+		&_history->session(),
+		draft.items,
+		draft.options);
 	const auto dropNames = (draft.options != Options::PreserveInfo);
 	const auto dropCaptions = (draft.options == Options::NoNamesAndCaptions);
 	for (const auto &source : draft.items) {
@@ -834,7 +838,10 @@ void DraftOptionsBox(
 		const auto weak = base::make_weak(box);
 		auto forward = Data::ForwardDraft();
 		if (options) {
-			forward.options = *options;
+			forward.options = NormalizeForwardOptions(
+				&show->session(),
+				state->forward.items,
+				*options);
 			for (const auto &item : state->forward.items) {
 				forward.ids.push_back(item->fullId());
 			}
@@ -954,15 +961,20 @@ void DraftOptionsBox(
 
 	const auto setupForwardActions = [=] {
 		using Options = Data::ForwardOptions;
-		const auto now = state->forward.options;
 		const auto &items = state->forward.items;
+		state->forward.options = NormalizeForwardOptions(
+			&show->session(),
+			items,
+			state->forward.options);
+		const auto now = state->forward.options;
 		const auto count = items.size();
 		const auto dropNames = (now != Options::PreserveInfo);
 		const auto sendersCount = ItemsForwardSendersCount(items);
 		const auto captionsCount = ItemsForwardCaptionsCount(items);
-		const auto hasOnlyForcedForwardedInfo = !captionsCount
-			&& HasOnlyForcedForwardedInfo(items);
-		const auto canDropNames = !hasOnlyForcedForwardedInfo
+		const auto canHideAuthor = CanHideForwardAuthor(
+			&show->session(),
+			items);
+		const auto canDropNames = canHideAuthor
 			&& HasDropForwardedInfoSetting(items);
 		const auto dropCaptions = (now == Options::NoNamesAndCaptions);
 
@@ -989,7 +1001,7 @@ void DraftOptionsBox(
 				state->shown.force_assign(Section::Forward);
 			});
 		}
-		if (captionsCount) {
+		if (captionsCount && canHideAuthor) {
 			Settings::AddButtonWithIcon(
 				bottom,
 				(dropCaptions
@@ -1147,7 +1159,10 @@ void DraftOptionsBox(
 				.text = { tr::lng_reply_quote_long_text(tr::now) },
 			});
 		} else {
-			const auto options = state->forward.options;
+			const auto options = NormalizeForwardOptions(
+				&show->session(),
+				state->forward.items,
+				state->forward.options);
 			finish(resolveReply(), state->webpage, options);
 		}
 	};

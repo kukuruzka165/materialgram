@@ -152,7 +152,7 @@ void MediaGeneric::draw(Painter &p, const PaintContext &context) const {
 		}
 	}
 
-	const auto fullSelection = (context.selection == FullSelection);
+	const auto fullSelection = context.selected();
 	auto translated = 0;
 	auto symbolOffset = uint16(0);
 	for (const auto &entry : _entries) {

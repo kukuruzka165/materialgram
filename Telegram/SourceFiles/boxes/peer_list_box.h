@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/userpic_view.h"
 #include "ui/layers/box_content.h"
 #include "base/timer.h"
+#include "boxes/peer_list_scroll_cache.h"
 
 namespace style {
 struct PeerList;
@@ -36,6 +37,9 @@ struct ScrollToRequest;
 class PopupMenu;
 struct OutlineSegment;
 } // namespace Ui
+
+class PeerListSectionHeaders;
+class PeerListSectionIndex;
 
 using PaintRoundImageCallback = Fn<void(
 	Painter &p,
@@ -135,6 +139,14 @@ public:
 		int nameTop,
 		int outerWidth,
 		bool selected);
+
+	[[nodiscard]] QRect statusIconRect() const {
+		return _statusIconRect;
+	}
+	void paintStatusIcon(Painter &p, crl::time now, bool paused);
+
+	void rememberUserpicKey();
+	[[nodiscard]] bool userpicKeyChanged();
 
 	virtual QSize rightActionSize() const {
 		return QSize();
@@ -275,6 +287,13 @@ public:
 		_skipPeerBadge = skip;
 	}
 
+	void setSection(const QString &section) {
+		_section = section;
+	}
+	[[nodiscard]] const QString &section() const {
+		return _section;
+	}
+
 	virtual void lazyInitialize(const style::PeerListItem &st);
 	virtual void paintStatusText(
 		Painter &p,
@@ -308,15 +327,18 @@ private:
 	PeerListRowId _id = 0;
 	PeerData *_peer = nullptr;
 	mutable Ui::PeerUserpicView _userpic;
+	std::pair<uint64, uint64> _userpicKey;
 	std::unique_ptr<Ui::RippleAnimation> _ripple;
 	std::unique_ptr<Ui::RoundImageCheckbox> _checkbox;
 	Ui::Text::String _name;
 	Ui::Text::String _status;
 	Ui::PeerBadge _badge;
+	QRect _statusIconRect;
 	StatusType _statusType = StatusType::Online;
 	crl::time _statusValidTill = 0;
 	base::flat_set<QChar> _nameFirstLetters;
 	QString _savedMessagesStatus;
+	QString _section;
 	int _absoluteIndex = -1;
 	State _disabledState = State::Active;
 	bool _hidden : 1 = false;
@@ -347,6 +369,8 @@ public:
 	virtual void peerListSetBelowWidget(object_ptr<Ui::RpWidget> belowWidget) = 0;
 	virtual void peerListMouseLeftGeometry() = 0;
 	virtual void peerListSetSearchMode(PeerListSearchMode mode) = 0;
+	virtual void peerListSetShowSectionHeaders(bool shown) {
+	}
 	virtual void peerListAppendRow(std::unique_ptr<PeerListRow> row) = 0;
 	virtual void peerListAppendSearchRow(std::unique_ptr<PeerListRow> row) = 0;
 	virtual void peerListAppendFoundRow(not_null<PeerListRow*> row) = 0;
@@ -683,6 +707,14 @@ public:
 	void dragLeft();
 
 	void setIgnoreHiddenRowsOnSearch(bool value);
+	void setShowSectionHeaders(bool shown);
+
+	struct SectionLetter {
+		QString letter;
+		int contentTop = 0;
+	};
+	[[nodiscard]] std::vector<SectionLetter> sectionLetters() const;
+	[[nodiscard]] base::flat_set<QString> visibleSectionLetters() const;
 
 	// Interface for the controller.
 	void appendRow(std::unique_ptr<PeerListRow> row);
@@ -827,10 +859,12 @@ private:
 
 	void selectByMouse(QPoint globalPosition);
 	void loadProfilePhotos();
+	void invalidateLoadedUserpics();
 	void checkScrollForPreload();
 
 	void updateRow(not_null<PeerListRow*> row, RowIndex hint);
 	void updateRow(RowIndex row);
+	void updateRowStatus(not_null<PeerListRow*> row);
 	int getRowTop(RowIndex row) const;
 	PeerListRow *getRow(RowIndex element);
 	RowIndex findRowIndex(
@@ -849,6 +883,16 @@ private:
 		Fn<void(not_null<Ui::PopupMenu*>)> destroyed = nullptr);
 
 	crl::time paintRow(Painter &p, crl::time now, RowIndex index);
+	void paintRowContent(
+		Painter &p,
+		crl::time now,
+		RowIndex index,
+		bool selected,
+		int activeElement);
+
+	[[nodiscard]] bool sectionsShown() const;
+	void refreshSectionHeaders();
+	[[nodiscard]] int sectionsFullHeight() const;
 
 	void addRowEntry(not_null<PeerListRow*> row);
 	void addToSearchIndex(not_null<PeerListRow*> row);
@@ -906,6 +950,8 @@ private:
 	std::vector<not_null<PeerListRow*>> _filterResults;
 	base::flat_set<not_null<PeerListRow*>> _hiddenRows;
 
+	std::unique_ptr<PeerListSectionHeaders> _sections;
+
 	int _aboveHeight = 0;
 	int _belowHeight = 0;
 	bool _hideEmpty = false;
@@ -923,6 +969,8 @@ private:
 	std::vector<std::unique_ptr<PeerListRow>> _searchRows;
 	base::Timer _repaintByStatus;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
+
+	PeerListRowsScrollCache _rowsScrollCache;
 
 };
 
@@ -1018,6 +1066,9 @@ public:
 	}
 	void peerListSetSearchMode(PeerListSearchMode mode) override {
 		_content->setSearchMode(mode);
+	}
+	void peerListSetShowSectionHeaders(bool shown) override {
+		_content->setShowSectionHeaders(shown);
 	}
 	void peerListMouseLeftGeometry() override {
 		_content->mouseLeftGeometry();
@@ -1145,6 +1196,7 @@ public:
 		setAdditionalTitle(std::move(title));
 	}
 	void peerListSetSearchMode(PeerListSearchMode mode) override;
+	void peerListSetShowSectionHeaders(bool shown) override;
 	void peerListSetRowChecked(
 		not_null<PeerListRow*> row,
 		bool checked) override;
@@ -1197,8 +1249,11 @@ private:
 	[[nodiscard]] int topSelectSkip() const;
 	void updateScrollSkips();
 	void searchQueryChanged(const QString &query);
+	void refreshSectionIndex();
+	void updateSectionIndexGeometry();
 
 	object_ptr<Ui::SlideWrap<Ui::MultiSelect>> _select = { nullptr };
+	object_ptr<PeerListSectionIndex> _sectionIndex = { nullptr };
 
 	const std::shared_ptr<Main::SessionShow> _show;
 	Fn<void(QString)> _customQueryChangedCallback;

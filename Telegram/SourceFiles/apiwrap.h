@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_messages.h"
 
 class TaskQueue;
+class HistoryItem;
 struct MessageGroupId;
 struct SendingAlbum;
 enum class SendMediaType;
@@ -378,6 +379,10 @@ public:
 	void sendShortcutMessages(
 		not_null<PeerData*> peer,
 		BusinessShortcutId id);
+	void sendRichMessage(
+		not_null<HistoryItem*> item,
+		const MTPInputRichMessage &richMessage,
+		SendAction action);
 	void sendMessage(
 		MessageToSend &&message,
 		std::optional<MsgId> localMessageId = std::nullopt);

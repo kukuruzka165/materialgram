@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_prepare.h"
+#include "iv/iv_rich_page.h"
 #include "iv/markdown/iv_markdown_prepare_blocks.h"
 #include "iv/markdown/iv_markdown_prepare_formulas.h"
 #include "iv/markdown/iv_markdown_prepare_native_blocks.h"
@@ -15,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QElapsedTimer>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace Iv::Markdown {
@@ -63,15 +65,32 @@ void ApplySoftPreparedBlockLimit(std::vector<PreparedBlock> *blocks) {
 	blocks->push_back(ContentTooLongBlock());
 }
 
+[[nodiscard]] int PositiveLimit(int value, int fallback) {
+	return (value > 0) ? value : fallback;
+}
+
+[[nodiscard]] int LimitProduct(int a, int b) {
+	return int(std::min<int64>(
+		int64(a) * b,
+		std::numeric_limits<int>::max()));
+}
+
 } // namespace
 
 const MarkdownPrepareLimits &PrepareLimitsForIv() {
 	static const auto result = MarkdownPrepareLimits{
 		.tableRender = {
 			.maxRows = 128,
-			.maxColumns = 16,
+			.maxColumns = 20,
 			.maxCells = 1024,
 		},
+		.markdownTableRender = {
+			.maxRows = 1'000,
+			.maxColumns = 50,
+			.maxCells = 50'000,
+		},
+		.visualListDepth = 16,
+		.visualQuoteDepth = 16,
 		.maxPreparedBlocks = 4096,
 	};
 	return result;
@@ -79,6 +98,25 @@ const MarkdownPrepareLimits &PrepareLimitsForIv() {
 
 const MarkdownPrepareTableRenderLimits &PrepareTableRenderLimitsForIv() {
 	return PrepareLimitsForIv().tableRender;
+}
+
+MarkdownPrepareTableRenderLimits PrepareTableRenderLimitsForRichMessage(
+		const RichMessageLimits &limits) {
+	const auto fallback = RichMessageLimits();
+	const auto maxRows = PositiveLimit(limits.maxBlocks, fallback.maxBlocks);
+	const auto maxColumns = PositiveLimit(
+		limits.maxTableCols,
+		fallback.maxTableCols);
+	return {
+		.maxRows = maxRows,
+		.maxColumns = maxColumns,
+		.maxCells = LimitProduct(maxRows, maxColumns),
+	};
+}
+
+auto PrepareMarkdownTableRenderLimitsForIv()
+-> const MarkdownPrepareTableRenderLimits & {
+	return PrepareLimitsForIv().markdownTableRender;
 }
 
 MarkdownArticleContent PrepareSynchronously(PrepareRequest request) {
@@ -131,6 +169,12 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	auto timer = QElapsedTimer();
 	timer.start();
 	state.result.mediaRuntime = std::move(request.mediaRuntime);
+	state.result.editMode = request.editMode;
+	state.dimensions = request.dimensionsOverride.value_or(
+		CaptureMarkdownPrepareDimensions());
+	state.tableRenderLimits = request.tableRenderLimits.value_or(
+		PrepareTableRenderLimitsForIv());
+	state.editMode = request.editMode;
 	const auto finish = [&](NativeInstantViewPrepareResultKind kind, QString reason) {
 		state.result.debug.prepareMs = int(timer.elapsed());
 		return NativeInstantViewPrepareResult{
@@ -140,31 +184,18 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 		};
 	};
 
-	if (!request.source) {
+	if (!request.richPage) {
 		state.setFailure(
 			PrepareTerminalFailure::InvalidRequest,
-			u"missing-native-iv-source"_q);
+			u"missing-native-iv-rich-page"_q);
 		ClearPreparedOutput(&state.result);
 		return finish(
 			NativeInstantViewPrepareResultKind::Failure,
 			state.result.failure.debugReason);
 	}
 
-	for (const auto &photo : request.source->page.data().vphotos().v) {
-		RememberNativeIvPhoto(&state, photo);
-	}
-	if (request.source->webpagePhoto) {
-		RememberNativeIvPhoto(&state, *request.source->webpagePhoto);
-	}
-	for (const auto &document : request.source->page.data().vdocuments().v) {
-		RememberNativeIvDocument(&state, document);
-	}
-	if (request.source->webpageDocument) {
-		RememberNativeIvDocument(&state, *request.source->webpageDocument);
-	}
-
 	if (!PrepareNativeIvBlocks(
-			request.source->page.data().vblocks().v,
+			*request.richPage,
 			&state.result.blocks.blocks,
 			&state)) {
 		if (state.result.failure.failed()) {
@@ -178,9 +209,59 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 			&state.result.blocks.blocks);
 	}
 	ApplySoftPreparedBlockLimit(&state.result.blocks.blocks);
+	MeasureNativeIvPreparedFormulas(&state);
+	if (state.result.failure.failed()) {
+		ClearPreparedOutput(&state.result);
+		return finish(
+			NativeInstantViewPrepareResultKind::Failure,
+			state.result.failure.debugReason);
+	}
 	return finish(
 		NativeInstantViewPrepareResultKind::Supported,
 		QString());
+}
+
+NativeInstantViewLeafUpdateResult UpdatePreparedNativeInstantViewLeaf(
+		MarkdownArticleContent *content,
+		const RichPage &page,
+		const PreparedEditLeafSource &source,
+		std::optional<MarkdownPrepareTableRenderLimits> tableRenderLimits) {
+	if (!content) {
+		return NativeInstantViewLeafUpdateResult::Failed;
+	}
+	auto state = NativeIvPrepareState();
+	state.result.mediaRuntime = content->mediaRuntime;
+	state.result.editMode = content->editMode;
+	state.result.formulas = content->formulas;
+	state.dimensions = CaptureMarkdownPrepareDimensions();
+	state.tableRenderLimits = tableRenderLimits.value_or(
+		PrepareTableRenderLimitsForIv());
+	state.editMode = content->editMode;
+	state.nextFormulaIndex = int(content->formulas.size());
+	auto blocks = content->blocks.blocks;
+	auto formulaRange = NativeIvPreparedLeafFormulaRange{
+		.from = state.nextFormulaIndex,
+		.till = state.nextFormulaIndex,
+	};
+	const auto updated = UpdatePreparedNativeIvLeaf(
+		&blocks,
+		page,
+		source,
+		&state,
+		&formulaRange);
+	if (updated != NativeInstantViewLeafUpdateResult::Updated) {
+		return updated;
+	}
+	MeasureNativeIvPreparedFormulas(
+		&state,
+		formulaRange.from,
+		formulaRange.till);
+	if (state.result.failure.failed()) {
+		return NativeInstantViewLeafUpdateResult::Failed;
+	}
+	content->blocks.blocks = std::move(blocks);
+	content->formulas = std::move(state.result.formulas);
+	return NativeInstantViewLeafUpdateResult::Updated;
 }
 
 } // namespace Iv::Markdown

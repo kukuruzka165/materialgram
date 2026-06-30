@@ -343,6 +343,7 @@ boostReplaceUserpic: UserpicButton(defaultUserpicButton) {
 	photoSize: 60px;
 }
 boostReplaceIcon: icon{{ "stories/boost_mini", premiumButtonFg }};
+guardBotReplaceIcon: icon{{ "chat/mini_shield_lock", premiumButtonFg }};
 boostReplaceIconSkip: 3px;
 boostReplaceIconOutline: 2px;
 boostReplaceIconAdd: point(4px, 2px);

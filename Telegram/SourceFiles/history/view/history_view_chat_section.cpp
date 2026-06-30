@@ -1052,12 +1052,20 @@ void ChatWidget::setupSwipeReplyAndBack() {
 
 	auto init = [=, show = controller()->uiShow()](
 			Ui::Controls::SwipeHandlerInitData data) {
+		auto result = Ui::Controls::SwipeHandlerFinishData();
+		const auto horizontalScrollDelta = (data.direction == Qt::LeftToRight)
+			? 1
+			: -1;
+		if (_inner->canConsumeHorizontalScroll(
+				data.cursorPosition,
+				horizontalScrollDelta)) {
+			return result;
+		}
 		if (data.direction == Qt::RightToLeft) {
 			return Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {
 				controller()->showBackFromStack();
 			});
 		}
-		auto result = Ui::Controls::SwipeHandlerFinishData();
 		if (_inner->elementInSelectionMode(nullptr).inSelectionMode) {
 			return result;
 		}
@@ -1084,7 +1092,7 @@ void ChatWidget::setupSwipeReplyAndBack() {
 				? _inner->viewByPosition(still->position())
 				: nullptr;
 			const auto selected = (still && view)
-				? view->selectedQuote(_inner->getSelectedTextRange(still))
+				? view->selectedQuote(_inner->getSelectedTextSelection(still))
 				: SelectedQuote();
 			const auto exact = selected.item
 				? selected.item
@@ -1092,6 +1100,7 @@ void ChatWidget::setupSwipeReplyAndBack() {
 			if (!exact) {
 				return;
 			}
+			Window::ActivateWindow(controller());
 			_inner->replyToMessageRequestNotify({
 				.messageId = exact->fullId(),
 				.quote = selected.highlight.quote,
@@ -1109,6 +1118,15 @@ void ChatWidget::setupSwipeReplyAndBack() {
 		.update = std::move(update),
 		.init = std::move(init),
 		.dontStart = _inner->touchMaybeSelectingValue(),
+		.skipWheelEvent = [=](not_null<QWheelEvent*> event) {
+			const auto delta = Ui::ScrollDelta(event);
+			if (std::abs(delta.x()) <= std::abs(delta.y())) {
+				return false;
+			}
+			return _inner->canConsumeHorizontalScroll(
+				_inner->mapFromGlobal(event->globalPosition().toPoint()),
+				delta.x());
+		},
 	});
 }
 
@@ -1526,11 +1544,12 @@ void ChatWidget::edit(
 		}
 		return;
 	} else {
-		const auto maxCaptionSize = !hasMediaWithCaption
-			? MaxMessageSize
-			: Data::PremiumLimits(&session()).captionLengthCurrent();
+		const auto limits = Data::PremiumLimits(&session());
+		const auto maxTextSize = hasMediaWithCaption
+			? limits.captionLengthCurrent()
+			: limits.messageLengthCurrent();
 		const auto remove = _composeControls->fieldCharacterCount()
-			- maxCaptionSize;
+			- maxTextSize;
 		if (remove > 0) {
 			controller()->showToast(
 				tr::lng_edit_limit_reached(tr::now, lt_count, remove));
@@ -2186,6 +2205,50 @@ void ChatWidget::checkPinnedBarState() {
 		}
 	}, _pinnedBar->lifetime());
 
+	_pinnedBar->barRightClicks(
+	) | rpl::on_next([=] {
+		if (_pinnedBarHasCustomButton) {
+			return;
+		}
+		const auto reference = _pinnedClickedId
+			? _pinnedClickedId
+			: _pinnedTracker->currentMessageId().message;
+		if (!reference) {
+			return;
+		}
+		const auto top = Data::ResolveTopPinnedId(
+			_peer,
+			_repliesRootId,
+			_monoforumPeerId);
+		const auto targetId = (top && reference.msg >= top.msg)
+			? Data::ResolveMinPinnedId(
+				_peer,
+				_repliesRootId,
+				_monoforumPeerId)
+			: _pinnedTracker->nextPinnedId(reference.msg);
+		if (!targetId) {
+			return;
+		}
+		const auto jump = crl::guard(this, [=] {
+			const auto item = session().data().message(targetId);
+			if (!item) {
+				return;
+			}
+			showAtPosition(item->position());
+			_pinnedClickedId = FullMsgId();
+			_minPinnedId = std::nullopt;
+			updatePinnedViewer();
+		});
+		if (session().data().message(targetId)) {
+			jump();
+		} else {
+			session().api().requestMessageData(
+				session().data().peer(targetId.peer),
+				targetId.msg,
+				jump);
+		}
+	}, _pinnedBar->lifetime());
+
 	_pinnedBarHeight = 0;
 	_pinnedBar->heightValue(
 	) | rpl::on_next([=](int height) {
@@ -2232,6 +2295,7 @@ void ChatWidget::refreshPinnedBarButton(bool many, HistoryItem *item) {
 	};
 	auto customButton = CreatePinnedBarCustomButton(this, item, context);
 	if (customButton) {
+		_pinnedBarHasCustomButton = true;
 		struct State {
 			base::unique_qptr<Ui::PopupMenu> menu;
 		};
@@ -2248,6 +2312,7 @@ void ChatWidget::refreshPinnedBarButton(bool many, HistoryItem *item) {
 		_pinnedBar->setRightButton(std::move(customButton));
 		return;
 	}
+	_pinnedBarHasCustomButton = false;
 	const auto close = !many;
 	auto button = object_ptr<Ui::IconButton>(
 		this,

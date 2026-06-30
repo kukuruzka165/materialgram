@@ -8,9 +8,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "history/view/history_view_element.h"
-#include "history/history_view_highlight_manager.h"
+#include "history/view/history_view_cursor_state.h"
 #include "history/admin_log/history_admin_log_item.h"
 #include "history/admin_log/history_admin_log_filter_value.h"
+#include "history/history_view_highlight_manager.h"
 #include "menu/menu_antispam_validator.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
@@ -133,10 +134,16 @@ public:
 		not_null<DocumentData*> document,
 		FullMsgId context,
 		bool showInMediaView = false) override;
+	bool elementScrollToLocalY(
+		not_null<const HistoryView::Element*> view,
+		int localTop) override;
 	void elementCancelUpload(const FullMsgId &context) override;
 	void elementShowTooltip(
 		const TextWithEntities &text,
 		Fn<void()> hiddenCallback) override;
+	void elementShowHiddenSenderTooltip(
+		FullMsgId itemId,
+		const TextWithEntities &text) override;
 	bool elementAnimationsPaused() override;
 	bool elementHideReply(
 		not_null<const HistoryView::Element*> view) override;
@@ -206,6 +213,7 @@ private:
 	};
 	using TextState = HistoryView::TextState;
 	using CursorState = HistoryView::CursorState;
+	using MessageSelection = HistoryView::MessageSelection;
 	using PointState = HistoryView::PointState;
 	using StateRequest = HistoryView::StateRequest;
 
@@ -424,11 +432,12 @@ private:
 	QPoint _mousePosition;
 	Element *_mouseActionItem = nullptr;
 	CursorState _mouseCursorState = CursorState();
-	uint16 _mouseTextSymbol = 0;
+	TextState _mouseTextAnchor;
 	bool _pressWasInactive = false;
+	bool _overSenderUserpic = false;
 
 	Element *_selectedItem = nullptr;
-	TextSelection _selectedText;
+	MessageSelection _selectedTextSelection;
 	bool _wasSelectedText = false; // was some text selected in current drag action
 	Qt::CursorShape _cursor = style::cur_default;
 

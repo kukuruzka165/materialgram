@@ -6,7 +6,10 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_article_selection.h"
-#include "lang/lang_keys.h"
+#include "iv/markdown/iv_markdown_prepare_links.h"
+#include "ui/text/text_utilities.h"
+
+#include "styles/style_iv.h"
 
 #include <algorithm>
 
@@ -21,6 +24,114 @@ struct TableCopySlot {
 	bool origin = false;
 };
 
+[[nodiscard]] auto BuildTableCopyGrid(const LaidOutBlock &block)
+-> std::vector<std::vector<TableCopySlot>> {
+	const auto rowCount = int(block.tableRows.size());
+	const auto columnCount = int(block.tableColumnWidths.size());
+	auto result = std::vector<std::vector<TableCopySlot>>(
+		std::max(rowCount, 0),
+		std::vector<TableCopySlot>(std::max(columnCount, 0)));
+	for (auto rowIndex = 0; rowIndex != rowCount; ++rowIndex) {
+		for (const auto &cell : block.tableRows[rowIndex].cells) {
+			const auto fromRow = std::clamp(rowIndex, 0, rowCount);
+			const auto toRow = std::clamp(rowIndex + cell.rowspan, 0, rowCount);
+			const auto fromColumn = std::clamp(cell.column, 0, columnCount);
+			const auto toColumn = std::clamp(
+				cell.column + cell.colspan,
+				0,
+				columnCount);
+			for (auto currentRow = fromRow; currentRow != toRow; ++currentRow) {
+				for (auto currentColumn = fromColumn;
+					currentColumn != toColumn;
+					++currentColumn) {
+					auto &slot = result[currentRow][currentColumn];
+					slot.cell = &cell;
+					slot.origin = (currentRow == rowIndex)
+						&& (currentColumn == cell.column);
+				}
+			}
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QRect ClipRectHorizontally(QRect rect, QRect clip) {
+	if (rect.isEmpty() || clip.isEmpty()) {
+		return QRect();
+	}
+	const auto left = std::max(rect.x(), clip.x());
+	const auto right = std::min(
+		rect.x() + rect.width(),
+		clip.x() + clip.width());
+	return QRect(
+		left,
+		rect.y(),
+		std::max(right - left, 0),
+		rect.height());
+}
+
+[[nodiscard]] QRect VisibleTextRect(QRect textRect, QRect outerRect) {
+	return ClipRectHorizontally(textRect, outerRect);
+}
+
+void RefreshBlockSegmentRect(
+		const LaidOutBlock &block,
+		SelectableSegment *segment) {
+	if (!segment) {
+		return;
+	}
+	switch (segment->kind) {
+	case SelectableSegmentKind::DisplayMath:
+		segment->outerRect = block.visibleFormulaRect;
+		break;
+	case SelectableSegmentKind::Table:
+		segment->outerRect = block.visibleTableRect;
+		break;
+	case SelectableSegmentKind::Placeholder:
+	case SelectableSegmentKind::Photo:
+	case SelectableSegmentKind::Media:
+		segment->outerRect = block.visibleMediaRect;
+		break;
+	case SelectableSegmentKind::CodeBlock:
+		segment->outerRect = block.outer;
+		segment->textRect = VisibleTextRect(
+			block.textRect,
+			block.contentRect.isEmpty() ? block.outer : block.contentRect);
+		break;
+	case SelectableSegmentKind::TextLeaf: {
+		auto sourceRect = QRect();
+		auto containerRect = block.outer;
+		auto interactionRect = QRect();
+		if (segment->leaf == &block.leaf) {
+			sourceRect = block.textRect;
+			if (block.kind == PreparedBlockKind::Details) {
+				interactionRect = block.headerRect;
+				containerRect = block.headerRect;
+			} else if (block.kind == PreparedBlockKind::CodeBlock) {
+				containerRect = block.contentRect;
+			}
+		} else if (segment->leaf == &block.labelLeaf) {
+			sourceRect = block.labelRect;
+			containerRect = block.headerRect.isEmpty()
+				? block.outer
+				: block.headerRect;
+		} else if (segment->leaf == &block.subtitleLeaf) {
+			sourceRect = block.subtitleRect;
+			containerRect = block.headerRect.isEmpty()
+				? block.outer
+				: block.headerRect;
+		} else if (segment->leaf == &block.actionLeaf) {
+			sourceRect = block.actionRect;
+		}
+		const auto visibleRect = VisibleTextRect(sourceRect, containerRect);
+		segment->outerRect = interactionRect.isEmpty()
+			? visibleRect
+			: interactionRect;
+		segment->textRect = visibleRect;
+	} break;
+	}
+}
+
 [[nodiscard]] TextForMimeData CopyTextForDisplayMath(const LaidOutBlock &block) {
 	return TextForMimeData::Simple(u"$$"_q + block.copyText + u"$$"_q);
 }
@@ -29,13 +140,14 @@ struct TableCopySlot {
 		const LaidOutBlock &block,
 		TextSelection selection = AllTextSelection) {
 	if (selection == AllTextSelection) {
-		auto rich = tr::marked(block.copyText);
+		auto rich = block.codeText;
 		if (!rich.text.isEmpty()) {
 			rich.entities.push_back(EntityInText(
 				EntityType::Pre,
 				0,
 				rich.text.size(),
 				block.codeLanguage));
+			SortEntities(&rich);
 		}
 		return TextForMimeData::Rich(std::move(rich));
 	}
@@ -44,7 +156,7 @@ struct TableCopySlot {
 	auto displayPosition = 0;
 	auto column = 0;
 	auto found = false;
-	const auto &text = block.copyText;
+	const auto &text = block.codeText.text;
 	for (auto i = 0, count = int(text.size()); i != count; ++i) {
 		const auto ch = text[i];
 		const auto width = (ch == QChar::Tabulation)
@@ -72,45 +184,23 @@ struct TableCopySlot {
 	if (!found || to <= from) {
 		return TextForMimeData();
 	}
-	auto rich = tr::marked(text.mid(from, to - from));
+	auto rich = Ui::Text::Mid(block.codeText, from, to - from);
 	if (!rich.text.isEmpty()) {
 		rich.entities.push_back(EntityInText(
 			EntityType::Pre,
 			0,
 			rich.text.size(),
 			block.codeLanguage));
+		SortEntities(&rich);
 	}
 	return TextForMimeData::Rich(std::move(rich));
 }
 
 [[nodiscard]] TextForMimeData CopyTextForTable(const LaidOutBlock &block) {
-	auto result = TextForMimeData();
 	const auto rowCount = int(block.tableRows.size());
 	const auto columnCount = int(block.tableColumnWidths.size());
-	auto grid = std::vector<std::vector<TableCopySlot>>(
-		std::max(rowCount, 0),
-		std::vector<TableCopySlot>(std::max(columnCount, 0)));
-	for (auto rowIndex = 0; rowIndex != rowCount; ++rowIndex) {
-		for (const auto &cell : block.tableRows[rowIndex].cells) {
-			const auto fromRow = std::clamp(rowIndex, 0, rowCount);
-			const auto toRow = std::clamp(rowIndex + cell.rowspan, 0, rowCount);
-			const auto fromColumn = std::clamp(cell.column, 0, columnCount);
-			const auto toColumn = std::clamp(
-				cell.column + cell.colspan,
-				0,
-				columnCount);
-			for (auto currentRow = fromRow; currentRow != toRow; ++currentRow) {
-				for (auto currentColumn = fromColumn;
-					currentColumn != toColumn;
-					++currentColumn) {
-					auto &slot = grid[currentRow][currentColumn];
-					slot.cell = &cell;
-					slot.origin = (currentRow == rowIndex)
-						&& (currentColumn == cell.column);
-				}
-			}
-		}
-	}
+	auto result = TextForMimeData();
+	const auto grid = BuildTableCopyGrid(block);
 	if (!block.leaf.isEmpty()) {
 		result.append(block.leaf.toTextForMimeData());
 		if (rowCount > 0 && columnCount > 0) {
@@ -128,6 +218,46 @@ struct TableCopySlot {
 			const auto &slot = grid[rowIndex][column];
 			if (slot.origin && slot.cell) {
 				result.append(slot.cell->leaf.toTextForMimeData());
+			}
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] TextForMimeData CopyTextForTableRange(
+		const LaidOutBlock &block,
+		int rowFrom,
+		int rowTill,
+		int columnFrom,
+		int columnTill) {
+	const auto rowCount = int(block.tableRows.size());
+	const auto columnCount = int(block.tableColumnWidths.size());
+	rowFrom = std::clamp(rowFrom, 0, rowCount);
+	rowTill = std::clamp(rowTill, 0, rowCount);
+	columnFrom = std::clamp(columnFrom, 0, columnCount);
+	columnTill = std::clamp(columnTill, 0, columnCount);
+	if (rowTill <= rowFrom || columnTill <= columnFrom) {
+		return TextForMimeData();
+	}
+	const auto grid = BuildTableCopyGrid(block);
+	auto result = TextForMimeData();
+	auto emitted = std::vector<const LaidOutTableCell*>();
+	for (auto rowIndex = rowFrom; rowIndex != rowTill; ++rowIndex) {
+		if (rowIndex != rowFrom) {
+			result.append(u"\n"_q);
+		}
+		for (auto column = columnFrom; column != columnTill; ++column) {
+			if (column != columnFrom) {
+				result.append(u"\t"_q);
+			}
+			const auto &slot = grid[rowIndex][column];
+			if (slot.cell
+				&& (std::find(
+					emitted.begin(),
+					emitted.end(),
+					slot.cell) == emitted.end())) {
+				result.append(slot.cell->leaf.toTextForMimeData());
+				emitted.push_back(slot.cell);
 			}
 		}
 	}
@@ -322,6 +452,235 @@ struct TableCopySlot {
 	return (from < to);
 }
 
+[[nodiscard]] bool IndexInRange(int index, int from, int till) {
+	return (index >= from) && (index < till);
+}
+
+[[nodiscard]] bool RangesIntersect(
+		int firstFrom,
+		int firstTill,
+		int secondFrom,
+		int secondTill) {
+	return (firstFrom < secondTill) && (secondFrom < firstTill);
+}
+
+[[nodiscard]] const PreparedEditSelection *StructuralSelection(
+		const PaintSelectionState &selectionState,
+		PreparedEditSelectionKind kind) {
+	if (!selectionState.hasStructuralSelection()) {
+		return nullptr;
+	}
+	const auto selection = selectionState.structuralSelection;
+	return (selection->kind == kind) ? selection : nullptr;
+}
+
+[[nodiscard]] bool ContainerHasPrefix(
+		const PreparedEditBlockContainerPath &path,
+		const PreparedEditBlockContainerPath &prefix) {
+	if (path.steps.size() < prefix.steps.size()) {
+		return false;
+	}
+	return std::equal(
+		prefix.steps.begin(),
+		prefix.steps.end(),
+		path.steps.begin());
+}
+
+[[nodiscard]] bool PathInBlockRange(
+		const PreparedEditBlockPath &path,
+		const PreparedEditBlockRange &range) {
+	if (path.container == range.container) {
+		return IndexInRange(path.index, range.from, range.till);
+	}
+	if (!ContainerHasPrefix(path.container, range.container)
+		|| (path.container.steps.size() <= range.container.steps.size())) {
+		return false;
+	}
+	const auto &step = path.container.steps[range.container.steps.size()];
+	return IndexInRange(step.blockIndex, range.from, range.till);
+}
+
+[[nodiscard]] bool PathInListItemRange(
+		const PreparedEditBlockPath &path,
+		const PreparedEditListItemRange &range) {
+	if (!ContainerHasPrefix(path.container, range.block.container)
+		|| (path.container.steps.size() <= range.block.container.steps.size())) {
+		return false;
+	}
+	const auto &step = path.container.steps[range.block.container.steps.size()];
+	return (step.kind == PreparedEditBlockContainerKind::ListItemChildren)
+		&& (step.blockIndex == range.block.index)
+		&& IndexInRange(step.listItemIndex, range.from, range.till);
+}
+
+[[nodiscard]] bool BlockSourceInStructuralSelection(
+		const PreparedEditBlockSource &source,
+		const PreparedEditSelection &selection) {
+	switch (selection.kind) {
+	case PreparedEditSelectionKind::Blocks:
+		return PathInBlockRange(source.path, selection.blocks);
+	case PreparedEditSelectionKind::ListItems:
+		return PathInListItemRange(source.path, selection.listItems);
+	case PreparedEditSelectionKind::TableRows:
+	case PreparedEditSelectionKind::TableCells:
+	case PreparedEditSelectionKind::None:
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] bool ListItemSourceInStructuralSelection(
+		const PreparedEditListItemSource &source,
+		const PreparedEditSelection &selection) {
+	switch (selection.kind) {
+	case PreparedEditSelectionKind::Blocks:
+		return PathInBlockRange(source.block, selection.blocks);
+	case PreparedEditSelectionKind::ListItems:
+		return (source.block == selection.listItems.block)
+			&& IndexInRange(
+				source.listItemIndex,
+				selection.listItems.from,
+				selection.listItems.till);
+	case PreparedEditSelectionKind::TableRows:
+	case PreparedEditSelectionKind::TableCells:
+	case PreparedEditSelectionKind::None:
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] bool BlockBelongsToStructuralSelection(
+		const LaidOutBlock &block,
+		const PreparedEditSelection &selection) {
+	return (block.editListItem
+		&& ListItemSourceInStructuralSelection(*block.editListItem, selection))
+		|| (block.editBlock
+			&& BlockSourceInStructuralSelection(*block.editBlock, selection));
+}
+
+[[nodiscard]] bool WholeSegmentStructurallySelected(
+		const SelectableSegment &segment,
+		const PaintSelectionState &selectionState) {
+	if (!selectionState.hasStructuralSelection() || !segment.block) {
+		return false;
+	}
+	switch (segment.kind) {
+	case SelectableSegmentKind::CodeBlock:
+	case SelectableSegmentKind::DisplayMath:
+	case SelectableSegmentKind::Table:
+	case SelectableSegmentKind::Placeholder:
+	case SelectableSegmentKind::Photo:
+	case SelectableSegmentKind::Media:
+		return BlockBelongsToStructuralSelection(
+			*segment.block,
+			*selectionState.structuralSelection);
+	case SelectableSegmentKind::TextLeaf:
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] std::optional<TextSelection> StructuralTextSelectionForSegment(
+		const SelectableSegment &segment,
+		const PaintSelectionState &selectionState) {
+	if (!selectionState.hasStructuralSelection()
+		|| !segment.isTextLeaf()
+		|| !segment.block) {
+		return std::nullopt;
+	}
+	switch (selectionState.structuralSelection->kind) {
+	case PreparedEditSelectionKind::Blocks:
+	case PreparedEditSelectionKind::ListItems:
+		return BlockBelongsToStructuralSelection(
+			*segment.block,
+			*selectionState.structuralSelection)
+			? std::make_optional(AllTextSelection)
+			: std::nullopt;
+	case PreparedEditSelectionKind::TableRows:
+	case PreparedEditSelectionKind::TableCells:
+	case PreparedEditSelectionKind::None:
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
+[[nodiscard]] const LaidOutBlock *FindTableBlock(
+		const std::vector<SelectableSegment> &segments,
+		const PreparedEditBlockPath &path) {
+	for (const auto &segment : segments) {
+		if (!segment.block
+			|| (segment.block->kind != PreparedBlockKind::Table)
+			|| !segment.block->editBlock
+			|| (segment.block->editBlock->path != path)) {
+			continue;
+		}
+		return segment.block;
+	}
+	return nullptr;
+}
+
+[[nodiscard]] TextForMimeData TextForStructuralTableSelection(
+		const std::vector<SelectableSegment> &segments,
+		const PreparedEditSelection &selection) {
+	switch (selection.kind) {
+	case PreparedEditSelectionKind::TableRows: {
+		const auto block = FindTableBlock(segments, selection.tableRows.block);
+		return block
+			? CopyTextForTableRange(
+				*block,
+				selection.tableRows.from,
+				selection.tableRows.till,
+				0,
+				int(block->tableColumnWidths.size()))
+			: TextForMimeData();
+	}
+	case PreparedEditSelectionKind::TableCells: {
+		const auto block = FindTableBlock(segments, selection.tableCells.block);
+		return block
+			? CopyTextForTableRange(
+				*block,
+				selection.tableCells.rowFrom,
+				selection.tableCells.rowTill,
+				selection.tableCells.columnFrom,
+				selection.tableCells.columnTill)
+			: TextForMimeData();
+	}
+	case PreparedEditSelectionKind::Blocks:
+	case PreparedEditSelectionKind::ListItems:
+	case PreparedEditSelectionKind::None:
+		return TextForMimeData();
+	}
+	return TextForMimeData();
+}
+
+[[nodiscard]] const style::TextStyle &HeadingTextStyle(
+		int level,
+		const style::Markdown &st) {
+	switch (std::clamp(level, 1, 6)) {
+	case 1: return st.heading1;
+	case 2: return st.heading2;
+	case 3: return st.heading3;
+	case 4: return st.heading4;
+	case 5: return st.heading5;
+	case 6: return st.heading6;
+	}
+	return st.heading6;
+}
+
+[[nodiscard]] bool IsEmbedPostAuthorSegment(
+		const SelectableSegment &segment) {
+	return segment.block
+		&& (segment.block->kind == PreparedBlockKind::EmbedPost)
+		&& (segment.leaf == &segment.block->labelLeaf);
+}
+
+[[nodiscard]] bool IsEmbedPostDateSegment(
+		const SelectableSegment &segment) {
+	return segment.block
+		&& (segment.block->kind == PreparedBlockKind::EmbedPost)
+		&& (segment.leaf == &segment.block->subtitleLeaf);
+}
+
 } // namespace
 
 void CollectSelectableSegments(
@@ -336,6 +695,7 @@ void CollectSelectableSegments(
 		block.tertiarySegmentIndex = -1;
 		switch (block.kind) {
 		case PreparedBlockKind::Paragraph:
+		case PreparedBlockKind::Thinking:
 		case PreparedBlockKind::Heading:
 		case PreparedBlockKind::Details: {
 			if (block.leaf.isEmpty() && block.textRect.isEmpty()) {
@@ -350,6 +710,7 @@ void CollectSelectableSegments(
 				: block.textRect;
 			segment.textRect = block.textRect;
 			segment.textWidth = block.textWidth;
+			segment.align = block.flowTextAlign;
 			segment.length = block.leaf.length();
 			block.segmentIndex = AddSelectableSegment(
 				segments,
@@ -373,13 +734,14 @@ void CollectSelectableSegments(
 			segment.kind = SelectableSegmentKind::DisplayMath;
 			segment.block = &block;
 			segment.outerRect = block.visibleFormulaRect;
+			segment.align = block.formulaAlign;
 			segment.length = 1;
 			block.segmentIndex = AddSelectableSegment(
 				segments,
 				std::move(segment));
 		} break;
 		case PreparedBlockKind::Table: {
-			if (!block.textRect.isEmpty() && !block.leaf.isEmpty()) {
+			if (!block.textRect.isEmpty()) {
 				auto textSegment = SelectableSegment();
 				textSegment.kind = SelectableSegmentKind::TextLeaf;
 				textSegment.leaf = &block.leaf;
@@ -387,6 +749,7 @@ void CollectSelectableSegments(
 				textSegment.outerRect = block.textRect;
 				textSegment.textRect = block.textRect;
 				textSegment.textWidth = block.textWidth;
+				textSegment.align = block.flowTextAlign;
 				textSegment.length = block.leaf.length();
 				block.secondarySegmentIndex = AddSelectableSegment(
 					segments,
@@ -444,7 +807,7 @@ void CollectSelectableSegments(
 			block.segmentIndex = AddSelectableSegment(
 				segments,
 				std::move(segment));
-			if (!block.textRect.isEmpty() && !block.leaf.isEmpty()) {
+			if (!block.textRect.isEmpty()) {
 				auto textSegment = SelectableSegment();
 				textSegment.kind = SelectableSegmentKind::TextLeaf;
 				textSegment.leaf = &block.leaf;
@@ -512,6 +875,50 @@ void CollectSelectableSegments(
 	}
 }
 
+void RefreshScrollableSegmentRects(
+		const std::vector<LaidOutBlock> &blocks,
+		std::vector<SelectableSegment> *segments) {
+	if (!segments) {
+		return;
+	}
+	for (const auto &block : blocks) {
+		RefreshScrollableSegmentRects(block, segments);
+	}
+}
+
+void RefreshScrollableSegmentRects(
+		const LaidOutBlock &block,
+		std::vector<SelectableSegment> *segments) {
+	if (!segments) {
+		return;
+	}
+	const auto refreshIndex = [&](int index) {
+		if (index < 0 || index >= int(segments->size())) {
+			return;
+		}
+		RefreshBlockSegmentRect(block, &(*segments)[index]);
+	};
+	refreshIndex(block.segmentIndex);
+	refreshIndex(block.secondarySegmentIndex);
+	refreshIndex(block.tertiarySegmentIndex);
+	if (block.kind == PreparedBlockKind::Table) {
+		for (const auto &row : block.tableRows) {
+			for (const auto &cell : row.cells) {
+				if (cell.segmentIndex < 0
+					|| cell.segmentIndex >= int(segments->size())) {
+					continue;
+				}
+				auto &segment = (*segments)[cell.segmentIndex];
+				segment.outerRect = cell.outer;
+				segment.textRect = VisibleTextRect(
+					cell.textRect,
+					cell.outer);
+			}
+		}
+	}
+	RefreshScrollableSegmentRects(block.children, segments);
+}
+
 void CollectAnchors(
 		const std::vector<LaidOutBlock> &blocks,
 		std::vector<std::pair<QString, int>> *anchors) {
@@ -519,8 +926,23 @@ void CollectAnchors(
 		return;
 	}
 	for (const auto &block : blocks) {
-		if (!block.anchorId.isEmpty()) {
-			anchors->push_back({ block.anchorId, block.outer.top() });
+		if (!block.anchorId.isEmpty() || !block.anchorIds.empty()) {
+			const auto top = !block.textRect.isEmpty()
+				? block.textRect.top()
+				: [&] {
+					for (const auto &child : block.children) {
+						if (child.outer.height() > 0) {
+							return child.outer.top();
+						}
+					}
+					return block.outer.top();
+				}();
+			if (!block.anchorId.isEmpty()) {
+				anchors->push_back({ block.anchorId, top });
+			}
+			for (const auto &anchorId : block.anchorIds) {
+				anchors->push_back({ anchorId, top });
+			}
 		}
 		CollectAnchors(block.children, anchors);
 	}
@@ -539,11 +961,69 @@ int SegmentLength(const SelectableSegment &segment) {
 	return std::max(segment.length, 0);
 }
 
+const style::TextStyle &TextStyleForSegment(
+		const SelectableSegment &segment,
+		const style::Markdown &st) {
+	if (segment.cell) {
+		return segment.cell->header
+			? st.table.headerStyle
+			: st.table.bodyStyle;
+	} else if (IsEmbedPostAuthorSegment(segment)) {
+		return st.embedPost.authorStyle;
+	} else if (IsEmbedPostDateSegment(segment)) {
+		return st.embedPost.dateStyle;
+	} else if (segment.kind == SelectableSegmentKind::CodeBlock) {
+		return st.code;
+	} else if (!segment.block) {
+		return st.body;
+	}
+	switch (segment.block->kind) {
+	case PreparedBlockKind::Details:
+		return st.details.summaryStyle;
+	case PreparedBlockKind::CodeBlock:
+		return st.code;
+	case PreparedBlockKind::Heading:
+		return HeadingTextStyle(segment.block->headingLevel, st);
+	default:
+		return st.body;
+	}
+}
+
+style::color TextColorForSegment(
+		const SelectableSegment &segment,
+		const style::Markdown &st) {
+	if (IsEmbedPostAuthorSegment(segment)) {
+		return st.embedPost.authorFg;
+	} else if (IsEmbedPostDateSegment(segment)) {
+		return st.embedPost.dateFg;
+	} else if (segment.block
+		&& (segment.block->kind == PreparedBlockKind::Thinking)) {
+		return st.supplementaryTextColor;
+	} else if (segment.kind == SelectableSegmentKind::CodeBlock
+		|| (segment.block
+			&& segment.block->kind == PreparedBlockKind::CodeBlock)) {
+		return st.textPalette.monoFg;
+	} else if (segment.block && segment.block->supplementary) {
+		return st.supplementaryTextColor;
+	}
+	return st.textColor;
+}
+
 bool TableSegmentSelected(
 		const PaintSelectionState &selectionState,
 		int tableSegmentIndex) {
-	if (selectionState.empty() || tableSegmentIndex < 0) {
+	if (!selectionState.segments || tableSegmentIndex < 0) {
 		return false;
+	}
+	if (selectionState.hasStructuralSelection()) {
+		if (const auto segment = FindSegment(
+				selectionState.segments,
+				tableSegmentIndex);
+			segment && WholeSegmentStructurallySelected(
+				*segment,
+				selectionState)) {
+			return true;
+		}
 	}
 	if (SingleTableCellSelection(selectionState, tableSegmentIndex)) {
 		return false;
@@ -588,10 +1068,82 @@ bool TableSegmentSelected(
 		&& (normalized.to.segment > upper);
 }
 
+bool StructuralBlockSelected(
+		const PaintSelectionState &selectionState,
+		const PreparedEditBlockSource &source) {
+	const auto selection = StructuralSelection(
+		selectionState,
+		PreparedEditSelectionKind::Blocks);
+	if (!selection) {
+		return false;
+	}
+	const auto &range = selection->blocks;
+	return (source.path.container == range.container)
+		&& IndexInRange(source.path.index, range.from, range.till);
+}
+
+bool StructuralListItemSelected(
+		const PaintSelectionState &selectionState,
+		const PreparedEditListItemSource &source) {
+	const auto selection = StructuralSelection(
+		selectionState,
+		PreparedEditSelectionKind::ListItems);
+	if (!selection) {
+		return false;
+	}
+	const auto &range = selection->listItems;
+	return (source.block == range.block)
+		&& IndexInRange(source.listItemIndex, range.from, range.till);
+}
+
+bool StructuralTableRowSelected(
+		const PaintSelectionState &selectionState,
+		const PreparedEditTableRowSource &source) {
+	const auto selection = StructuralSelection(
+		selectionState,
+		PreparedEditSelectionKind::TableRows);
+	if (!selection) {
+		return false;
+	}
+	const auto &range = selection->tableRows;
+	return (source.block == range.block)
+		&& IndexInRange(source.tableRowIndex, range.from, range.till);
+}
+
+bool StructuralTableCellSelected(
+		const PaintSelectionState &selectionState,
+		const PreparedEditTableCellSource &source) {
+	const auto selection = StructuralSelection(
+		selectionState,
+		PreparedEditSelectionKind::TableCells);
+	if (!selection) {
+		return false;
+	}
+	const auto &range = selection->tableCells;
+	if (range.empty()
+		|| source.tableRowIndex < 0
+		|| source.column < 0
+		|| source.colspan <= 0
+		|| source.rowspan <= 0) {
+		return false;
+	}
+	return (source.block == range.block)
+		&& RangesIntersect(
+			source.tableRowIndex,
+			source.tableRowIndex + source.rowspan,
+			range.rowFrom,
+			range.rowTill)
+		&& RangesIntersect(
+			source.column,
+			source.column + source.colspan,
+			range.columnFrom,
+			range.columnTill);
+}
+
 std::optional<TextSelection> TextSelectionForSegment(
 		const SelectableSegment &segment,
 		const PaintSelectionState &selectionState) {
-	if (selectionState.empty()) {
+	if (!selectionState.segments) {
 		return std::nullopt;
 	}
 	if (segment.tableSegmentIndex >= 0) {
@@ -605,6 +1157,11 @@ std::optional<TextSelection> TextSelectionForSegment(
 	if (segment.tableSegmentIndex >= 0
 		&& TableSegmentSelected(selectionState, segment.tableSegmentIndex)) {
 		return std::nullopt;
+	}
+	if (const auto structural = StructuralTextSelectionForSegment(
+			segment,
+			selectionState)) {
+		return structural;
 	}
 	return BaseTextSelectionForSegment(segment, selectionState.selection);
 }
@@ -621,8 +1178,11 @@ std::optional<TextSelection> TextSelectionForSegmentIndex(
 bool WholeSegmentSelected(
 		const SelectableSegment &segment,
 		const PaintSelectionState &selectionState) {
-	if (selectionState.empty() || segment.isTextLeaf()) {
+	if (!selectionState.segments || segment.isTextLeaf()) {
 		return false;
+	}
+	if (WholeSegmentStructurallySelected(segment, selectionState)) {
+		return true;
 	}
 	if (segment.kind == SelectableSegmentKind::Table) {
 		return TableSegmentSelected(selectionState, segment.index);
@@ -678,14 +1238,24 @@ TextForMimeData TextForSegment(
 TextForMimeData TextForSelectedSegments(
 		const std::vector<SelectableSegment> &segments,
 		MarkdownArticleSelection selection,
-		const MarkdownArticleSelectionEndpoints *endpoints) {
-	if (selection.empty()) {
+		const MarkdownArticleSelectionEndpoints *endpoints,
+		const PreparedEditSelection *structuralSelection) {
+	if (structuralSelection
+		&& !structuralSelection->empty()
+		&& (structuralSelection->kind == PreparedEditSelectionKind::TableRows
+			|| structuralSelection->kind
+				== PreparedEditSelectionKind::TableCells)) {
+		return TextForStructuralTableSelection(segments, *structuralSelection);
+	}
+	if (selection.empty()
+		&& (!structuralSelection || structuralSelection->empty())) {
 		return TextForMimeData();
 	}
 	const auto selectionState = PaintSelectionState{
 		.segments = &segments,
 		.selection = selection,
 		.endpoints = endpoints,
+		.structuralSelection = structuralSelection,
 	};
 	auto pieces = std::vector<TextForMimeData>();
 	for (const auto &segment : segments) {

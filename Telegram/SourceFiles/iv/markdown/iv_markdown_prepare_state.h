@@ -9,11 +9,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "iv/markdown/iv_markdown_parse.h"
 #include "iv/markdown/iv_markdown_prepare.h"
-#include "iv/iv_prepare.h"
 
 #include <QtCore/QByteArray>
 
-#include <memory>
 #include <vector>
 
 namespace Iv::Markdown {
@@ -52,30 +50,22 @@ struct PrepareState {
 	[[nodiscard]] QString formulaSourceText(int index) const;
 };
 
-struct NativeIvPhotoInfo {
-	uint64 id = 0;
-	int width = 0;
-	int height = 0;
-};
-
-struct NativeIvDocumentInfo {
-	uint64 id = 0;
-	int width = 0;
-	int height = 0;
-	QString fileName;
-	QString title;
-	QString performer;
-	int duration = 0;
-	bool isVideoFile = false;
-	bool isAnimation = false;
-};
-
 struct NativeIvPrepareState {
 	MarkdownArticleContent result;
-	std::vector<NativeIvPhotoInfo> photos;
-	std::vector<NativeIvDocumentInfo> documents;
+	MarkdownPrepareDimensions dimensions;
+	MarkdownPrepareTableRenderLimits tableRenderLimits;
+	bool editMode = false;
 	int nextGeneratedId = 0;
+	int nextFormulaIndex = 0;
 
+	[[nodiscard]] int rememberFormula(
+		MathKind kind,
+		QString formulaTex,
+		int textSize,
+		int renderWidthCap,
+		int renderHeightCap);
+	[[nodiscard]] int rememberFormula(const PreparedBlock &block);
+	void addFormulaWarning();
 	void setFailure(
 		PrepareTerminalFailure terminal,
 		QString debugReason);

@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h"
 #include "core/update_checker.h"
 #include "core/sandbox.h"
+#include "core/version.h"
 #include "base/concurrent_timer.h"
 #include "base/options.h"
 
@@ -35,7 +36,7 @@ base::options::toggle OptionHighDpiDownscale({
 		" (another approach, likely better quality).",
 	.scope = [] {
 		return !Platform::IsMac()
-			&& QLibraryInfo::version() >= QVersionNumber(6, 4);
+			&& QLibraryInfo::version() >= QVersionNumber(6, 8);
 	},
 	.restartRequired = true,
 });
@@ -304,23 +305,11 @@ base::options::toggle OptionFractionalScalingEnabled({
 	.restartRequired = true,
 });
 
-base::options::toggle OptionUseQtRhi({
-	.id = kOptionUseQtRhi,
-	.name = "Use Qt RHI renderer",
-	.defaultValue = true,
-	.scope = [] {
-		return (!Platform::IsWindows() || Platform::IsWindowsARM64())
-			&& QLibraryInfo::version() >= QVersionNumber(6, 7);
-	},
-	.restartRequired = true,
-});
-
 } // namespace
 
 const char kOptionFractionalScalingEnabled[] = "fractional-scaling-enabled";
 const char kOptionHighDpiDownscale[] = "high-dpi-downscale";
 const char kOptionFreeType[] = "freetype";
-const char kOptionUseQtRhi[] = "use-qt-rhi";
 
 Launcher *Launcher::InstanceSetter::Instance = nullptr;
 
@@ -371,30 +360,11 @@ void Launcher::initHighDpi() {
 	QApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
 #endif // Qt < 6.0.0
 
-	const auto downscale = OptionHighDpiDownscale.value();
-	if (downscale) {
+	if (OptionHighDpiDownscale.value()) {
 		qputenv("QT_WIDGETS_HIGHDPI_DOWNSCALE", "1");
-		qputenv("QT_WIDGETS_RHI", "1");
-		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
 	} else {
 		qunsetenv("QT_WIDGETS_HIGHDPI_DOWNSCALE");
 	}
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (OptionUseQtRhi.value()) {
-		qputenv("QT_WIDGETS_RHI", "1");
-#ifdef Q_OS_MAC
-		qputenv("QT_WIDGETS_RHI_BACKEND",
-			Platform::MetalSupported() ? "metal" : "opengl");
-#elif defined(Q_OS_WIN)
-		qputenv("QT_WIDGETS_RHI_BACKEND", "d3d11");
-#else
-		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
-#endif
-	} else if (!downscale) {
-		qunsetenv("QT_WIDGETS_RHI");
-		qunsetenv("QT_WIDGETS_RHI_BACKEND");
-	}
-#endif // Qt >= 6.7
 
 	if (OptionFractionalScalingEnabled.value()
 			|| OptionHighDpiDownscale.value()) {

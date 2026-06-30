@@ -53,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "dialogs/dialogs_widget.h"
 #include "history/history_widget.h"
+#include "history/history_drag_area.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/view/media/history_view_media.h"
 #include "history/view/history_view_chat_section.h"
@@ -75,6 +76,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "core/shortcuts.h"
 #include "core/application.h"
+#include "core/click_handler_types.h"
 #include "core/changelogs.h"
 #include "core/mime_type.h"
 #include "calls/calls_call.h"
@@ -436,6 +438,15 @@ MainWidget::MainWidget(
 	cSetOtherOnline(0);
 
 	session().data().stickers().notifySavedGifsUpdated();
+
+	const auto weak = base::make_weak(controller);
+	DragArea::SetupProxyDropArea(this, [=](const QString &localUrl) {
+		Core::App().openLocalUrl(
+			localUrl,
+			QVariant::fromValue(ClickHandlerContext{
+				.sessionWindow = weak,
+			}));
+	});
 }
 
 MainWidget::~MainWidget() {
@@ -1343,6 +1354,8 @@ bool MainWidget::showHistoryInDifferentWindow(
 		return true;
 	} else if (windowId().hasChatsList()) {
 		return false;
+	} else if (params.preferCurrentWindow) {
+		return false;
 	}
 	const auto account = not_null(&session().account());
 	auto primary = Core::App().separateWindowFor(account);
@@ -1472,6 +1485,9 @@ void MainWidget::showHistory(
 			|| (params.animated == anim::type::instant)) {
 			return false;
 		}
+		if (params.slideFromBottom) {
+			return !_history->isHidden();
+		}
 		if (!peerId) {
 			if (isOneColumn()) {
 				return _dialogs && _dialogs->isHidden();
@@ -1545,7 +1561,9 @@ void MainWidget::showHistory(
 		if (!_showAnimation) {
 			if (!animationParams.oldContentCache.isNull()) {
 				_history->showAnimated(
-					back
+					params.slideFromBottom
+						? Window::SlideDirection::FromBottom
+						: back
 						? Window::SlideDirection::FromLeft
 						: Window::SlideDirection::FromRight,
 					animationParams);
@@ -1819,9 +1837,9 @@ void MainWidget::showNewSection(
 	auto saveInStack = (params.way == SectionShow::Way::Forward);
 	const auto thirdSectionTop = getThirdSectionTop();
 	const auto newThirdGeometry = QRect(
-		width() - st::columnMinimalWidthThird,
+		width() - _thirdColumnWidth,
 		thirdSectionTop,
-		st::columnMinimalWidthThird,
+		_thirdColumnWidth,
 		height() - thirdSectionTop);
 	auto newThirdSection = (isThreeColumn() && params.thirdColumn)
 		? memento->createWidget(
@@ -2813,6 +2831,7 @@ bool MainWidget::eventFilter(QObject *o, QEvent *e) {
 			const auto event = static_cast<QMouseEvent*>(e);
 			if (event->button() == Qt::BackButton) {
 				if (!Core::App().hideMediaView()
+					&& !_controller->window().closeLayerByBackButton()
 					&& (!_dialogs || !_dialogs->cancelSearchByMouseBack())) {
 					handleHistoryBack();
 				}
@@ -2840,6 +2859,9 @@ void MainWidget::handleAdaptiveLayoutUpdate() {
 }
 
 void MainWidget::handleHistoryBack() {
+	if (_mainSection && _mainSection->showBackInternal()) {
+		return;
+	}
 	const auto openedFolder = _controller->openedFolder().current();
 	const auto openedForum = _controller->shownForum().current();
 	const auto rootPeer = !_stack.empty()

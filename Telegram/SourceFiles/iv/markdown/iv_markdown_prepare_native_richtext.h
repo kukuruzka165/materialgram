@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "iv/iv_rich_page.h"
 #include "iv/markdown/iv_markdown_prepare_state.h"
 
 namespace Iv::Markdown {
@@ -16,55 +17,49 @@ inline constexpr auto kNativeIvLinkSpecialColorIndex = 9;
 struct PreparedIvRichText {
 	TextWithEntities text;
 	std::vector<PreparedLink> links;
+	std::vector<QString> anchorIds;
 };
 
-void RememberNativeIvPhoto(
-	NativeIvPrepareState *state,
-	const MTPPhoto &photo);
-void RememberNativeIvDocument(
-	NativeIvPrepareState *state,
-	const MTPDocument &document);
+struct NativeIvRichTextContext {
+	int textSize = 0;
+	int renderWidthCap = 0;
+	int renderHeightCap = 0;
+	bool dropClickHandlers = false;
+};
+
 [[nodiscard]] bool PrepareNativeIvPlainPlaceholderBlock(
 	QString label,
 	std::vector<PreparedBlock> *result);
-[[nodiscard]] bool PrepareNativeIvPlaceholderBlock(
-	QString label,
-	const MTPPageCaption &caption,
-	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state,
-	std::optional<EmbedRequest> embed = std::nullopt);
 [[nodiscard]] bool PrepareNativeIvPhotoBlock(
-	const MTPDpageBlockPhoto &data,
+	const Iv::RichPage::Block &data,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvVideoBlock(
-	const MTPDpageBlockVideo &data,
+	const Iv::RichPage::Block &data,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvAudioBlock(
-	const MTPDpageBlockAudio &data,
+	const Iv::RichPage::Block &data,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvMapBlock(
-	const MTPDpageBlockMap &data,
+	const Iv::RichPage::Block &data,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvChannelBlock(
-	const MTPDpageBlockChannel &data,
+	const Iv::RichPage::Block &data,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvGroupedMediaBlock(
-	const QVector<MTPPageBlock> &items,
-	const MTPPageCaption &caption,
-	PreparedGroupedMediaIntent intent,
-	QString placeholderLabel,
+	const Iv::RichPage::Block &data,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvRichText(
-	const MTPRichText &text,
+	const Iv::RichPage::RichText &text,
 	PreparedIvRichText *result,
 	QString *blockAnchorId,
-	NativeIvPrepareState *state);
+	NativeIvPrepareState *state,
+	NativeIvRichTextContext context = {});
 [[nodiscard]] bool AppendPreparedIvRichBlock(
 	std::vector<PreparedBlock> *result,
 	PreparedBlockKind kind,
@@ -72,6 +67,8 @@ void RememberNativeIvDocument(
 	PreparedIvRichText prepared,
 	QString anchorId = QString(),
 	bool allowEmpty = false,
-	bool supplementary = false);
+	bool supplementary = false,
+	std::optional<PreparedEditBlockSource> editBlock = std::nullopt,
+	std::optional<PreparedEditLeafSource> editLeaf = std::nullopt);
 
 } // namespace Iv::Markdown

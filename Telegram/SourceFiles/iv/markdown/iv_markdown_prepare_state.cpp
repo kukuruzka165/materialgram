@@ -44,11 +44,44 @@ void PrepareState::rememberFormula(const PreparedBlock &block) {
 		request->dimensions.displayMathMaxRenderHeight);
 }
 
+int NativeIvPrepareState::rememberFormula(
+		MathKind kind,
+		QString formulaTex,
+		int textSize,
+		int renderWidthCap,
+		int renderHeightCap) {
+	const auto index = nextFormulaIndex++;
+	if (index >= int(result.formulas.size())) {
+		result.formulas.resize(index + 1);
+	}
+	auto &slot = result.formulas[index];
+	slot.trimmedTex = formulaTex.trimmed();
+	slot.kind = kind;
+	slot.textSize = textSize;
+	slot.renderWidthCap = renderWidthCap;
+	slot.renderHeightCap = renderHeightCap;
+	slot.present = true;
+	return index;
+}
+
+int NativeIvPrepareState::rememberFormula(const PreparedBlock &block) {
+	return rememberFormula(
+		block.mathKind,
+		block.formulaTex,
+		dimensions.displayMathTextSize,
+		dimensions.displayMathMaxRenderWidth,
+		dimensions.displayMathMaxRenderHeight);
+}
+
 void PrepareState::addPrepareWarning() {
 	++result.debug.prepareWarningCount;
 }
 
 void PrepareState::addFormulaWarning() {
+	++result.debug.formulaWarningCount;
+}
+
+void NativeIvPrepareState::addFormulaWarning() {
 	++result.debug.formulaWarningCount;
 }
 
@@ -107,7 +140,6 @@ void ClearPreparedOutput(MarkdownArticleContent *result) {
 	result->blocks.blocks.clear();
 	result->footnotes.clear();
 	result->formulas.clear();
-	result->embedHtmlResources.clear();
 }
 
 } // namespace Iv::Markdown

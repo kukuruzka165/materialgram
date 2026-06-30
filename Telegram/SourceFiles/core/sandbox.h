@@ -78,8 +78,6 @@ private:
 		FnMut<void()> callable;
 	};
 
-	bool notifyOrInvoke(QObject *receiver, QEvent *e);
-
 	void closeApplication(); // will be done in aboutToQuit()
 	void checkForQuit(); // will be done in exec()
 	void checkForEmptyLoopNestingLevel();
@@ -136,6 +134,8 @@ private:
 	rpl::event_stream<> _widgetUpdateRequests;
 
 	std::unique_ptr<QThread> _deadlockDetector;
+
+	rpl::lifetime _lifetime;
 
 };
 

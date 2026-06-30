@@ -10,8 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 
-#include <QtGui/QColor>
-
 namespace Ui::Premium {
 
 class StarRenderer;
@@ -24,6 +22,7 @@ public:
 	[[nodiscard]] static bool Supported();
 
 	void setColors(QColor gradient1, QColor gradient2);
+	void setGolden(bool golden);
 	void setShownProgress(float64 progress);
 	void setPaused(bool paused);
 	void startEnter();
@@ -31,6 +30,7 @@ public:
 	[[nodiscard]] rpl::producer<float64> flungStrength() const;
 
 protected:
+	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	void showEvent(QShowEvent *e) override;
 	void hideEvent(QHideEvent *e) override;
@@ -66,6 +66,8 @@ private:
 
 	void ensureSurface();
 	[[nodiscard]] QWidget *surfaceWidget() const;
+	void freeze();
+	void unfreeze();
 	void startAnimation();
 	void stopAnimation();
 	void frame();
@@ -86,11 +88,13 @@ private:
 
 	StarRenderer *_renderer = nullptr;
 	std::unique_ptr<RpWidgetWrap> _surface;
+	QImage _frozen;
 	Ui::Animations::Basic _animation;
 	crl::time _lastFrame = 0;
 
 	QColor _gradient1;
 	QColor _gradient2;
+	bool _golden = false;
 
 	float64 _yaw = 0.;
 	float64 _pitch = 0.;
@@ -109,6 +113,8 @@ private:
 	rpl::event_stream<float64> _flung;
 
 	bool _paused = false;
+	bool _entered = false;
+	crl::time _pausedAt = 0;
 
 };
 

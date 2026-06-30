@@ -157,4 +157,46 @@ void MeasurePreparedFormulas(PrepareState *state) {
 		= state->result.debug.formulaMeasureMs;
 }
 
+void MeasureNativeIvPreparedFormulas(NativeIvPrepareState *state) {
+	MeasureNativeIvPreparedFormulas(
+		state,
+		0,
+		int(state->result.formulas.size()));
+}
+
+void MeasureNativeIvPreparedFormulas(
+		NativeIvPrepareState *state,
+		int from,
+		int till) {
+	const auto &dimensions = state->dimensions;
+	auto renderer = MathRenderer();
+	auto timer = QElapsedTimer();
+	timer.start();
+	const auto count = int(state->result.formulas.size());
+	from = std::clamp(from, 0, count);
+	till = std::clamp(till, from, count);
+	for (auto i = from; i != till; ++i) {
+		auto &slot = state->result.formulas[i];
+		if (!slot.present) {
+			continue;
+		}
+		const auto signature = FormulaMeasurementSignature(slot, dimensions);
+		auto data = std::make_shared<MeasuredFormula>(renderer.measureFormula({
+			.trimmedTex = signature.trimmedTex,
+			.kind = signature.kind,
+			.textSize = signature.textSize,
+			.renderWidthCap = signature.renderWidthCap,
+			.renderHeightCap = signature.renderHeightCap,
+		}));
+		slot.measuredData = data;
+		slot.measured = *data;
+		if (!slot.measured.success) {
+			state->addFormulaWarning();
+		}
+	}
+	state->result.debug.formulaMeasureMs = int(timer.elapsed());
+	state->result.debug.formulaRenderMs
+		= state->result.debug.formulaMeasureMs;
+}
+
 } // namespace Iv::Markdown

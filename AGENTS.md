@@ -129,6 +129,13 @@ Retrying builds wastes time and context. The ONLY fix is for the user to close t
 - Do not save source, header, build/config, style, or localization files as UTF-8 with BOM. Use UTF-8 without BOM.
 - When rewriting project text files for normalization, preserve file content otherwise and do not introduce a BOM.
 
+## Commits
+
+- Subject: one concise, plain-language line summarizing the change, ~50-60 characters, matching the style of recent `git log` subjects. This is usually the entire message.
+- Add a short plain-language body only when the subject can't carry it (what was done, not the technical how) — a line or two at most.
+- Never add a `Co-Authored-By:` line or any tool/assistant attribution trailer.
+- Never add `Autotask:`/attempt or other workflow markers — commits read like normal history.
+
 ## Local Storage Serialization
 
 Both app-level (`Core::Settings`) and session-level (`Main::SessionSettings`) use sequential binary serialization via `QDataStream`. Key rules:
@@ -183,25 +190,44 @@ QString currentTitle = tr::lng_settings_title(tr::now);
 rpl::producer<QString> nameProducer = GetNameProducer();
 ```
 
-**Use trailing return types for long return types:**
+**Use trailing return types only when the normal form is too long:**
 
-Never split a long return type onto the line before a function declaration or definition:
-
-```cpp
-// BAD:
-std::shared_ptr<PlaceholderBlockRuntime>
-getOrCreatePlaceholderRuntime(PreparedPlaceholderBlockId id);
-```
-
-Use `auto` with a trailing return type instead:
+Prefer the normal return type form when the opening line fits comfortably, roughly around 77 characters or less:
 
 ```cpp
 // GOOD:
-auto getOrCreatePlaceholderRuntime(PreparedPlaceholderBlockId id)
--> std::shared_ptr<PlaceholderBlockRuntime>;
+[[nodiscard]] TextWithEntities FlattenSummaryBlocks(
+	const std::vector<Block> &blocks);
 ```
 
-This applies to both declarations and definitions. It keeps the method name at the front, makes scanning easier, and avoids orphaned return-type lines.
+Do not use one-line trailing return types, or put the trailing return type after `)` on the same line. If it fits on one line with trailing syntax, the normal form would be shorter and easier to read:
+
+```cpp
+// BAD:
+auto ComputeTitle() -> QString;
+
+// BAD:
+[[nodiscard]] auto FlattenSummaryBlocks(
+	const std::vector<Block> &blocks) -> TextWithEntities;
+```
+
+Use `auto` with a trailing return type only when the normal opening line
+`{attributes} {return-type} {class-name::}{function-name(}` would be too long, or would force the return type onto its own line. Put the arrow and return type on the next line so the return type remains easy to find:
+
+```cpp
+// BAD:
+not_null<HistoryView::Controls::ComposeAiButton*>
+HistoryView::Controls::SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args);
+```
+
+```cpp
+// GOOD:
+auto HistoryView::Controls::SetupCaptionAiButton(
+		SetupCaptionAiButtonArgs &&args)
+-> not_null<HistoryView::Controls::ComposeAiButton*>;
+```
+
+This applies to both declarations and definitions.
 
 **Use `_q` for QString literals:**
 

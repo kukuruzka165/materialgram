@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
 
 #include <QtGui/QGuiApplication>
@@ -594,8 +595,11 @@ void CloudList::showMenu(Element &element) {
 		_contextMenu->addAction(tr::lng_theme_share(tr::now), [=] {
 			QGuiApplication::clipboard()->setText(
 				_window->session().createInternalLinkFull("addtheme/" + slug));
-			_window->window().showToast(
-				tr::lng_background_link_copied(tr::now));
+			_window->window().showToast({
+				.text = { tr::lng_background_link_copied(tr::now) },
+				.iconLottie = u"toast/voip_invite"_q,
+				.iconLottieSize = st::toastLottieIconSize,
+			});
 		}, &st::menuIconShare);
 	}
 	if (cloud.documentId

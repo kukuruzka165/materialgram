@@ -149,6 +149,7 @@ struct Args {
 	not_null<Delegate*> delegate;
 	MenuButtons menuButtons;
 	bool fullscreen = false;
+	bool sameOrigin = false;
 	bool allowClipboardRead = false;
 	rpl::producer<DownloadsProgress> downloadsProgress;
 };
@@ -329,6 +330,8 @@ private:
 	bool _externalShellBootstrapped = false;
 	bool _externalWindowCloseRequested = false;
 	QString _externalShellToken;
+	QString _initialOrigin;
+	QString _currentOrigin;
 	uint64 _externalShellGeneration = 0;
 	bool _externalBackVisible = false;
 	ExternalShellColorState _externalShellColorState;
@@ -364,6 +367,7 @@ private:
 	bool _hiddenForPayment : 1 = false;
 	bool _closeWithConfirmationScheduled : 1 = false;
 	bool _allowClipboardRead : 1 = false;
+	bool _sameOrigin : 1 = false;
 	bool _inBlockingRequest : 1 = false;
 	bool _headerColorReceived : 1 = false;
 	bool _bodyColorReceived : 1 = false;

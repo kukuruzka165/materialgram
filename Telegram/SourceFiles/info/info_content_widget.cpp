@@ -223,7 +223,7 @@ Ui::RpWidget *ContentWidget::doSetInnerWidget(
 			Wrap wrap) {
 		const auto added = (wrap == Wrap::Layer)
 			? 0
-			: std::max(scrollHeight - innerHeight, 0);
+			: std::max(scrollHeight - innerHeight - _innerTopReserve, 0);
 		if (_addedHeight != added) {
 			_addedHeight = added;
 			updateInnerPadding();
@@ -300,7 +300,31 @@ void ContentWidget::applyAdditionalScroll(int additionalScroll) {
 
 void ContentWidget::updateInnerPadding() {
 	const auto addedToBottom = std::max(_additionalScroll, _addedHeight);
-	_innerWrap->setPadding({ 0, 0, 0, addedToBottom });
+	_innerWrap->setPadding({ 0, _innerTopReserve, 0, addedToBottom });
+}
+
+void ContentWidget::setInnerTopReserve(int reserve) {
+	if (_innerTopReserve != reserve) {
+		_innerTopReserve = reserve;
+		if (_innerWrap) {
+			updateInnerPadding();
+		}
+	}
+}
+
+void ContentWidget::setupFlexibleRegularScroll(
+		not_null<Ui::RpWidget*> inner,
+		not_null<Ui::RpWidget*> pinnedToTop) {
+	SetupFlexibleRegularScroll(
+		_scroll.data(),
+		inner,
+		pinnedToTop,
+		[=](int skip) { setScrollTopSkip(skip); },
+		[=](int reserve) { setInnerTopReserve(reserve); },
+		[=](QMargins padding) { setPaintPadding(padding); },
+		[=](rpl::producer<not_null<QEvent*>> events) {
+			setViewport(std::move(events));
+		});
 }
 
 void ContentWidget::applyMaxVisibleHeight(int maxVisibleHeight) {
@@ -319,6 +343,7 @@ rpl::producer<int> ContentWidget::desiredHeightValue() const {
 	//) | rpl::map(_1 + _2 + _3);
 	) | rpl::map([=](int desired, int, int) {
 		return desired
+			+ _innerTopReserve
 			+ _scrollTopSkip.current()
 			+ _scrollBottomSkip.current();
 	});
@@ -518,14 +543,29 @@ void ContentWidget::setupSwipeHandler(not_null<Ui::RpWidget*> widget) {
 	};
 
 	auto init = [=](Ui::Controls::SwipeHandlerInitData data) {
-		const auto isBack = (data.direction == Qt::RightToLeft)
-			&& _controller->hasBackButton();
-		return isBack
+		if (data.direction != Qt::RightToLeft) {
+			return Ui::Controls::SwipeHandlerFinishData();
+		}
+		const auto parent = _controller->parentController();
+		auto action = Fn<void()>();
+		if (_controller->hasBackButton()) {
+			action = [=] {
+				parent->hideLayer();
+				_controller->showBackFromStack();
+			};
+		} else if (_controller->wrap() == Wrap::Side) {
+			action = [=] {
+				parent->closeThirdSection();
+			};
+		} else if (_controller->wrap() == Wrap::Layer) {
+			action = [=] {
+				parent->hideLayer();
+				parent->hideSpecialLayer();
+			};
+		}
+		return action
 			? Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {
-				checkBeforeClose(crl::guard(this, [=] {
-					_controller->parentController()->hideLayer();
-					_controller->showBackFromStack();
-				}));
+				checkBeforeClose(crl::guard(this, action));
 			})
 			: Ui::Controls::SwipeHandlerFinishData();
 	};

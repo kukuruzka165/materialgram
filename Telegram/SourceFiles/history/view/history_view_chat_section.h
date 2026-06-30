@@ -435,6 +435,7 @@ private:
 	int _pinnedBarHeight = 0;
 	FullMsgId _pinnedClickedId;
 	std::optional<FullMsgId> _minPinnedId;
+	bool _pinnedBarHasCustomButton = false;
 	HistoryItem *_shownPinnedItem = nullptr;
 
 	std::unique_ptr<Ui::PinnedBar> _repliesRootView;

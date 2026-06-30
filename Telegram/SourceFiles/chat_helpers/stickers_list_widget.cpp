@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/stickers_lottie.h"
 #include "chat_helpers/stickers_list_footer.h"
 #include "ui/controls/tabbed_search.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/effects/animations.h"
@@ -2675,7 +2676,11 @@ base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
 			[=] {
 				localSetsManager->install(setId);
 				if (isMasks) {
-					show->showToast(tr::lng_masks_installed(tr::now));
+					show->showToast({
+						.text = { tr::lng_masks_installed(tr::now) },
+						.iconLottie = u"toast/contact_check"_q,
+						.iconLottieSize = st::toastLottieIconSize,
+					});
 				} else if (isEmoji) {
 					session->data().stickers().notifyEmojiSetInstalled(
 						setId);
@@ -2697,9 +2702,13 @@ base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
 		tr::lng_context_copy_link(tr::now),
 		[=] {
 			TextUtilities::SetClipboardText(TextForMimeData::Simple(url));
-			show->showToast(isEmoji
-				? tr::lng_stickers_copied_emoji(tr::now)
-				: tr::lng_stickers_copied(tr::now));
+			show->showToast({
+				.text = { isEmoji
+					? tr::lng_stickers_copied_emoji(tr::now)
+					: tr::lng_stickers_copied(tr::now) },
+				.iconLottie = u"toast/voip_invite"_q,
+				.iconLottieSize = st::toastLottieIconSize,
+			});
 		},
 		&st::menuIconLink);
 	if (installed) {

@@ -278,6 +278,10 @@ void Session::appConfigRefreshed() {
 		u"premium_purchase_blocked"_q,
 		true);
 #endif // OS_MAC_STORE
+
+	_messagePrimaryEditedDate = config.get<bool>(
+		u"message_primary_edited_date"_q,
+		false);
 }
 
 void Session::setTmpPassword(const QByteArray &password, TimeId validUntil) {

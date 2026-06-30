@@ -65,6 +65,7 @@ struct FileChosen {
 	Ui::MessageSendingAnimationFrom messageSendingFrom;
 	std::shared_ptr<Data::EmojiStatusCollectible> collectible;
 	TextWithTags caption;
+	bool needsCaption = false;
 };
 
 struct PhotoChosen {
@@ -82,6 +83,7 @@ using InlineChosen = InlineBots::ResultSelected;
 enum class TabbedSelectorMode {
 	Full,
 	EmojiOnly,
+	CustomEmojiOnly,
 	StickersOnly,
 	MediaEditor,
 	EmojiStatus,

@@ -218,7 +218,12 @@ TopBarWidget::TopBarWidget(
 		| UpdateFlag::SupportInfo
 		| UpdateFlag::Rights
 		| UpdateFlag::EmojiStatus
+		| UpdateFlag::Name
 	) | rpl::on_next([=](const Data::PeerUpdate &update) {
+		if ((update.flags & UpdateFlag::Name)
+			&& (update.peer == titleNamePeer())) {
+			TopBarWidget::update();
+		}
 		if (update.flags & UpdateFlag::HasCalls) {
 			if (update.peer->isUser()
 				&& (update.peer->isSelf()
@@ -553,19 +558,8 @@ void TopBarWidget::paintTopBar(Painter &p) {
 		? _activeChat.key.owningHistory()->peer.get()
 		: nullptr;
 	const auto folder = _activeChat.key.folder();
-	const auto sublist = _activeChat.key.sublist();
 	const auto topic = _activeChat.key.topic();
-	const auto history = _activeChat.key.history();
-	const auto broadcastForMonoforum = history
-		? history->peer->monoforumBroadcast()
-		: nullptr;
-	const auto namePeer = broadcastForMonoforum
-		? broadcastForMonoforum
-		: history
-		? history->peer.get()
-		: sublist
-		? sublist->sublistPeer().get()
-		: nullptr;
+	const auto namePeer = titleNamePeer();
 	if (topic && _activeChat.section == Section::Replies) {
 		p.setPen(st::dialogsNameFg);
 		topic->chatListNameText().drawElided(
@@ -703,6 +697,21 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			paintStatus(p, statusleft, statustop, statuswidth, width());
 		}
 	}
+}
+
+PeerData *TopBarWidget::titleNamePeer() const {
+	const auto history = _activeChat.key.history();
+	const auto broadcastForMonoforum = history
+		? history->peer->monoforumBroadcast()
+		: nullptr;
+	const auto sublist = _activeChat.key.sublist();
+	return broadcastForMonoforum
+		? broadcastForMonoforum
+		: history
+		? history->peer.get()
+		: sublist
+		? sublist->sublistPeer().get()
+		: nullptr;
 }
 
 bool TopBarWidget::paintSendAction(
@@ -1169,18 +1178,18 @@ void TopBarWidget::updateControlsGeometry() {
 			fieldWidth,
 			_searchField->height());
 
-		auto right = fieldLeft + fieldWidth;
-		_searchCancel->moveToLeft(
-			right - _searchCancel->width(),
-			_searchField->y());
-		right -= st::dialogsCalendar.width;
+		const auto fieldY = _searchField->y();
+		const auto cancelLeft = fieldLeft
+			+ fieldWidth
+			- _searchCancel->width();
+		_searchCancel->moveToLeft(cancelLeft, fieldY);
 		if (_jumpToDate) {
-			_jumpToDate->moveToLeft(right, _searchField->y());
+			_jumpToDate->moveToLeft(
+				cancelLeft - st::dialogsCalendarTopBar.width,
+				fieldY);
 		}
-		right -= st::dialogsSearchFrom.width;
-		if (_chooseFromUser) {
-			_chooseFromUser->moveToLeft(right, _searchField->y());
-		}
+		updateChooseFromUserGeometry();
+		updateSearchJumpToDateVisibility();
 	}
 
 	_rightTaken = 0;
@@ -1301,17 +1310,8 @@ void TopBarWidget::updateControlsVisibility() {
 			: false);
 	updateSearchVisibility();
 	if (_searchMode) {
-		const auto hasSearchQuery = _searchField
-			&& !_searchField->getLastText().isEmpty();
-		if (!_jumpToDate || hasSearchQuery) {
-			_searchCancel->show(anim::type::normal);
-			if (_jumpToDate) {
-				_jumpToDate->hide(anim::type::normal);
-			}
-		} else {
-			_searchCancel->hide(anim::type::normal);
-			_jumpToDate->show(anim::type::normal);
-		}
+		_searchCancel->show(anim::type::normal);
+		updateSearchJumpToDateVisibility();
 	}
 	_menuToggle->setVisible(hasMenu
 		&& !_chooseForReportReason
@@ -1468,7 +1468,7 @@ bool TopBarWidget::toggleSearch(bool shown, anim::type animated) {
 			const auto was = _searchQuery.current();
 			const auto now = _searchField->getLastText();
 			if (_jumpToDate && was.isEmpty() != now.isEmpty()) {
-				updateControlsVisibility();
+				updateSearchJumpToDateVisibility();
 			}
 			if (_chooseFromUser) {
 				auto switchToChooseFrom = SwitchToChooseFromQuery();
@@ -1509,10 +1509,11 @@ void TopBarWidget::searchEnableJumpToDate(bool enable) {
 	} else if (!_jumpToDate) {
 		_jumpToDate.create(
 			this,
-			object_ptr<Ui::IconButton>(this, st::dialogsCalendar));
-		_jumpToDate->toggle(
-			_searchField->getLastText().isEmpty(),
-			anim::type::instant);
+			object_ptr<Ui::IconButton>(this, st::dialogsCalendarTopBar));
+		_jumpToDate->toggle(false, anim::type::instant);
+		_jumpToDate->setUpdatedCallback([=](float64) {
+			updateChooseFromUserGeometry();
+		});
 		_jumpToDate->entity()->clicks(
 		) | rpl::to_empty | rpl::start_to_stream(
 			_jumpToDateRequests,
@@ -1520,6 +1521,51 @@ void TopBarWidget::searchEnableJumpToDate(bool enable) {
 	}
 	updateControlsVisibility();
 	updateControlsGeometry();
+}
+
+bool TopBarWidget::searchJumpToDateFits() const {
+	if (!_searchField) {
+		return false;
+	}
+	const auto &fieldSt = st::dialogsFilter;
+	const auto placeholderWidth = fieldSt.textMargins.left()
+		+ fieldSt.placeholderMargins.left()
+		+ fieldSt.placeholderFont->width(tr::lng_dlg_filter(tr::now))
+		+ fieldSt.placeholderMargins.right();
+	const auto required = placeholderWidth
+		+ st::dialogsFilterPadding.x()
+		+ st::dialogsSearchFromTopBar.width
+		+ st::dialogsCalendarTopBar.width
+		+ st::dialogsCancelSearch.width;
+	return (_searchField->width() >= required);
+}
+
+void TopBarWidget::updateChooseFromUserGeometry() {
+	if (!_searchField || !_searchCancel || !_chooseFromUser) {
+		return;
+	}
+	const auto fieldRight = st::dialogsFilterSkip
+		+ st::dialogsFilterPadding.x();
+	const auto cancelLeft = width() - fieldRight - _searchCancel->width();
+	const auto reserved = _jumpToDate
+		? anim::interpolate(
+			0,
+			st::dialogsCalendarTopBar.width,
+			_jumpToDate->shownProgress())
+		: 0;
+	_chooseFromUser->moveToLeft(
+		cancelLeft - reserved - st::dialogsSearchFromTopBar.width,
+		_searchField->y());
+}
+
+void TopBarWidget::updateSearchJumpToDateVisibility() {
+	if (!_searchMode || !_jumpToDate || !_searchField) {
+		return;
+	}
+	const auto empty = _searchField->getLastText().isEmpty();
+	_jumpToDate->toggle(
+		empty && searchJumpToDateFits(),
+		anim::type::normal);
 }
 
 void TopBarWidget::searchEnableChooseFromUser(bool enable, bool visible) {
@@ -1530,7 +1576,7 @@ void TopBarWidget::searchEnableChooseFromUser(bool enable, bool visible) {
 	} else if (!_chooseFromUser) {
 		_chooseFromUser.create(
 			this,
-			object_ptr<Ui::IconButton>(this, st::dialogsSearchFrom));
+			object_ptr<Ui::IconButton>(this, st::dialogsSearchFromTopBar));
 		_chooseFromUser->toggle(visible, anim::type::instant);
 		_chooseFromUser->entity()->clicks(
 		) | rpl::to_empty | rpl::start_to_stream(

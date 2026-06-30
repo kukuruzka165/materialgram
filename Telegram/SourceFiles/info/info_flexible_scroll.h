@@ -13,7 +13,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Info {
 
-extern const char kAlternativeScrollProcessing[];
+extern const char kClassicProfileScroll[];
+
+[[nodiscard]] bool UseClassicProfileScroll();
+
+void SetupFlexibleRegularScroll(
+	not_null<Ui::ScrollArea*> scroll,
+	not_null<Ui::RpWidget*> inner,
+	not_null<Ui::RpWidget*> pinnedToTop,
+	Fn<void(int)> setScrollTopSkip,
+	Fn<void(int)> setInnerTopReserve,
+	Fn<void(QMargins)> setPaintPadding,
+	Fn<void(rpl::producer<not_null<QEvent*>>)> setViewport);
 
 struct FlexibleScrollData {
 	rpl::event_stream<int> contentHeightValue;
@@ -34,7 +45,6 @@ public:
 private:
 	void setupScrollAnimation();
 	void setupScrollHandling();
-	void setupScrollHandlingWithFilter();
 	void scrollToY(int value);
 	void applyScrollToPinnedLayout(int scrollCurrent);
 
@@ -50,8 +60,6 @@ private:
 	int _scrollTopTo = 0;
 	crl::time _timeOffset = 0;
 	int _lastScrollApplied = 0;
-	int _scrollTopPrevious = 0;
-	bool _applyingFakeScrollState = false;
 	rpl::lifetime _filterLifetime;
 };
 

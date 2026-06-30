@@ -191,8 +191,9 @@ ClickHandler::TextEntity PreparedLinkClickHandler::getTextEntity() const {
 }
 
 [[nodiscard]] PreparedFormulaMeasurementSignature FormulaRenderSignature(
-		const PreparedFormulaSlot &slot) {
-	const auto &displayMath = st::defaultMarkdown.displayMath;
+		const PreparedFormulaSlot &slot,
+		const style::Markdown &st) {
+	const auto &displayMath = st.displayMath;
 	return {
 		.trimmedTex = slot.trimmedTex.trimmed(),
 		.kind = slot.kind,
@@ -208,8 +209,9 @@ ClickHandler::TextEntity PreparedLinkClickHandler::getTextEntity() const {
 
 [[nodiscard]] PreparedFormulaMeasurementSignature InlineFormulaSignature(
 		QString trimmedTex,
-		const style::TextStyle &textStyle) {
-	const auto &displayMath = st::defaultMarkdown.displayMath;
+		const style::TextStyle &textStyle,
+		const style::Markdown &st) {
+	const auto &displayMath = st.displayMath;
 	const auto textSize = FormulaTextSize(textStyle);
 	return {
 		.trimmedTex = std::move(trimmedTex).trimmed(),
@@ -248,14 +250,6 @@ void NormalizeInlineFormulaRasterMetrics(Formula *formula);
 	return (ratio > 0.) ? int(std::round(ratio)) : 0;
 }
 
-[[nodiscard]] int ScaledInlineFormulaMetric(int logicalValue) {
-	const auto safe = std::clamp(
-		logicalValue,
-		0,
-		std::numeric_limits<int>::max() / kFormulaExactMetricScale);
-	return safe * kFormulaExactMetricScale;
-}
-
 [[nodiscard]] int RoundedInlineFormulaMetric(int scaledValue) {
 	return (scaledValue > 0)
 		? ((scaledValue + kFormulaExactMetricScale - 1)
@@ -272,28 +266,6 @@ void NormalizeInlineFormulaRasterMetrics(Formula *formula);
 
 [[nodiscard]] qreal LogicalInlineFormulaMetric(int scaledValue) {
 	return qreal(scaledValue) / qreal(kFormulaExactMetricScale);
-}
-
-[[nodiscard]] FormulaExactMetrics InlineFormulaExactMetricsFromLogical(
-		QSize logicalSize,
-		int logicalAscent,
-		QMargins logicalInsets = {}) {
-	const auto scaledHeight = ScaledInlineFormulaMetric(
-		std::max(logicalSize.height(), 0));
-	return {
-		.scaledSize = QSize(
-			ScaledInlineFormulaMetric(std::max(logicalSize.width(), 0)),
-			scaledHeight),
-		.scaledAscent = std::clamp(
-			ScaledInlineFormulaMetric(logicalAscent),
-			0,
-			scaledHeight),
-		.scaledInsets = QMargins(
-			ScaledInlineFormulaMetric(std::max(logicalInsets.left(), 0)),
-			ScaledInlineFormulaMetric(std::max(logicalInsets.top(), 0)),
-			ScaledInlineFormulaMetric(std::max(logicalInsets.right(), 0)),
-			ScaledInlineFormulaMetric(std::max(logicalInsets.bottom(), 0))),
-	};
 }
 
 struct InlineFormulaColorizedKey {
@@ -478,18 +450,6 @@ private:
 
 };
 
-struct InlineIvImageMarkedContext {
-	Fn<void(QRect)> repaintRect;
-};
-
-struct InlineIvImageRepaintCallbacks {
-	Fn<void()> repaint;
-	Fn<void(QRect)> repaintRect;
-};
-
-thread_local auto CurrentInlineIvImageRepaintCallbacks
-	= std::vector<InlineIvImageRepaintCallbacks>();
-
 [[nodiscard]] QString InlineFormulaDisplayFallbackText(
 		const PreparedFormulaMeasurementSignature &signature,
 		const MeasuredFormula &measured) {
@@ -505,12 +465,14 @@ thread_local auto CurrentInlineIvImageRepaintCallbacks
 FindInlineFormulaMeasuredData(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		const PreparedFormulaMeasurementSignature &signature,
+		const style::Markdown &st,
 		MeasuredFormula *measured) {
 	if (!formulas) {
 		return nullptr;
 	}
 	for (const auto &slot : *formulas) {
-		if (!slot.present || FormulaRenderSignature(slot) != signature) {
+		if (!slot.present
+			|| (FormulaRenderSignature(slot, st) != signature)) {
 			continue;
 		}
 		if (measured) {
@@ -530,22 +492,6 @@ ClickHandlerPtr CreatePreparedLinkHandler(PreparedLink link) {
 	return std::make_shared<PreparedLinkClickHandler>(std::move(link));
 }
 
-InlineIvImageRepaintScope::InlineIvImageRepaintScope(
-		Fn<void()> repaint,
-		Fn<void(QRect)> repaintRect)
-: _active(true) {
-	CurrentInlineIvImageRepaintCallbacks.push_back({
-		.repaint = std::move(repaint),
-		.repaintRect = std::move(repaintRect),
-	});
-}
-
-InlineIvImageRepaintScope::~InlineIvImageRepaintScope() {
-	if (_active) {
-		CurrentInlineIvImageRepaintCallbacks.pop_back();
-	}
-}
-
 std::optional<PreparedLink> ExtractPreparedLink(const ClickHandlerPtr &link) {
 	if (const auto prepared = std::dynamic_pointer_cast<PreparedLinkClickHandler>(
 			link)) {
@@ -561,6 +507,21 @@ void BindLinks(
 		leaf->setLink(
 			link.index,
 			CreatePreparedLinkHandler(link));
+	}
+}
+
+void SetTextLeafSpoilerLinkFilter(
+		Ui::Text::String *leaf,
+		Fn<bool(const ClickContext&)> spoilerLinkFilter) {
+	if (!leaf->hasSpoilers()) {
+		return;
+	}
+	if (spoilerLinkFilter) {
+		leaf->setSpoilerLinkFilter(std::move(spoilerLinkFilter));
+	} else {
+		leaf->setSpoilerLinkFilter([](const ClickContext &context) {
+			return context.button == Qt::LeftButton;
+		});
 	}
 }
 
@@ -646,12 +607,13 @@ RenderedFormula EnsureFormulaRendered(
 		const PreparedFormulaSlot *slot,
 		RenderedFormula *rendered,
 		MathRenderer *renderer,
-		int devicePixelRatio) {
+		int devicePixelRatio,
+		const style::Markdown &st) {
 	if (!slot) {
 		return RenderedFormula();
 	}
 	return EnsureFormulaRendered(
-		FormulaRenderSignature(*slot),
+		FormulaRenderSignature(*slot, st),
 		slot->measured,
 		rendered,
 		renderer,
@@ -669,12 +631,14 @@ public:
 	[[nodiscard]] std::unique_ptr<Ui::Text::CustomEmoji> create(
 		const InlineTextObjectFormulaData &data,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const std::vector<PreparedFormulaSlot> *formulas);
 
 private:
 	[[nodiscard]] std::shared_ptr<InlineFormulaSharedState> lookupOrCreate(
 		const PreparedFormulaMeasurementSignature &signature,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const std::vector<PreparedFormulaSlot> *formulas);
 
 	std::shared_ptr<MathRenderer> _renderer;
@@ -717,10 +681,10 @@ auto InlineFormulaSharedState::vertical(const style::TextStyle &textStyle) const
 			.descent = geometry.descent,
 		};
 	}
-	const auto ascent = std::max(textStyle.font->ascent, 0);
+	const auto ascent = std::max(TextLineAscent(textStyle), 0);
 	return Ui::Text::CustomEmojiVerticalMetrics{
 		.ascent = ascent,
-		.descent = std::max(textStyle.font->height - ascent, 0),
+		.descent = std::max(TextLineHeight(textStyle) - ascent, 0),
 	};
 }
 
@@ -967,18 +931,18 @@ QString InlineIvImageObject::entityData() {
 auto InlineIvImageObject::vertical(const style::TextStyle &textStyle)
 -> std::optional<Ui::Text::CustomEmojiVerticalMetrics> {
 	if (_height > 0) {
-		const auto line = textStyle.font->height;
+		const auto line = TextLineHeight(textStyle);
 		const auto above = _height - (_height / 2);
-		const auto ascent = above - (line / 2) + textStyle.font->ascent;
+		const auto ascent = above - (line / 2) + TextLineAscent(textStyle);
 		return Ui::Text::CustomEmojiVerticalMetrics{
 			.ascent = ascent,
 			.descent = _height - ascent,
 		};
 	}
-	const auto ascent = std::max(textStyle.font->ascent, 0);
+	const auto ascent = std::max(TextLineAscent(textStyle), 0);
 	return Ui::Text::CustomEmojiVerticalMetrics{
 		.ascent = ascent,
-		.descent = std::max(textStyle.font->height - ascent, 0),
+		.descent = std::max(TextLineHeight(textStyle) - ascent, 0),
 	};
 }
 
@@ -1050,14 +1014,16 @@ bool InlineIvImageObject::readyInDefaultState() {
 std::unique_ptr<Ui::Text::CustomEmoji> InlineFormulaObjectCache::create(
 		const InlineTextObjectFormulaData &data,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const std::vector<PreparedFormulaSlot> *formulas) {
 	auto replacementText = data.copySource;
 	if (replacementText.isEmpty()) {
 		replacementText = u"$"_q + data.trimmedTex + u"$"_q;
 	}
 	auto state = lookupOrCreate(
-		InlineFormulaSignature(data.trimmedTex, textStyle),
+		InlineFormulaSignature(data.trimmedTex, textStyle, st),
 		textStyle,
+		st,
 		formulas);
 	if (!state) {
 		return nullptr;
@@ -1074,6 +1040,7 @@ std::unique_ptr<Ui::Text::CustomEmoji> InlineFormulaObjectCache::create(
 auto InlineFormulaObjectCache::lookupOrCreate(
 		const PreparedFormulaMeasurementSignature &signature,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const std::vector<PreparedFormulaSlot> *formulas)
 -> std::shared_ptr<InlineFormulaSharedState> {
 	if (const auto i = _states.find(signature); i != end(_states)) {
@@ -1083,24 +1050,21 @@ auto InlineFormulaObjectCache::lookupOrCreate(
 	auto measuredData = FindInlineFormulaMeasuredData(
 		formulas,
 		signature,
+		st,
 		&measured);
 	if (measuredData) {
 		measured = *measuredData;
 	} else {
-		const auto fallbackSize = QSize(
-			std::max(textStyle.font->width(signature.trimmedTex), 1),
-			std::max(textStyle.font->height, 1));
-		const auto fallbackAscent = std::max(textStyle.font->ascent, 0);
-		measured.logicalSize = fallbackSize;
-		measured.logicalDepth = std::max(
-			fallbackSize.height() - fallbackAscent,
-			0);
-		measured.exact = InlineFormulaExactMetricsFromLogical(
-			fallbackSize,
-			fallbackAscent);
-		measured.fallbackText = signature.trimmedTex;
-		measured.success = false;
-		NormalizeInlineFormulaRasterMetrics(&measured);
+		if (!_renderer) {
+			_renderer = std::make_shared<MathRenderer>();
+		}
+		measured = _renderer->measureFormula({
+			.trimmedTex = signature.trimmedTex,
+			.kind = signature.kind,
+			.textSize = signature.textSize,
+			.renderWidthCap = signature.renderWidthCap,
+			.renderHeightCap = signature.renderHeightCap,
+		});
 		measuredData = std::make_shared<MeasuredFormula>(measured);
 	}
 	const auto fallbackText = InlineFormulaDisplayFallbackText(
@@ -1154,32 +1118,40 @@ void InvalidateInlineFormulaRasterCache(
 void SetTextLeaf(
 		Ui::Text::String *leaf,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const TextWithEntities &text,
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	int minResizeWidth) {
+		int minResizeWidth,
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect,
+		Fn<bool(const ClickContext&)> spoilerLinkFilter) {
 	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
-	auto context = Ui::Text::MarkedContext();
-	if (!CurrentInlineIvImageRepaintCallbacks.empty()) {
-		const auto &callbacks = CurrentInlineIvImageRepaintCallbacks.back();
-		context.repaint = callbacks.repaint;
-		context.other = InlineIvImageMarkedContext{
-			.repaintRect = callbacks.repaintRect,
-		};
-	}
+	auto context = mediaRuntime
+		? mediaRuntime->textContext()
+		: Ui::Text::MarkedContext();
+	context.repaint = repaint;
+	const auto textStylePtr = &textStyle;
+	const auto stPtr = &st;
+	auto originalCustomEmojiFactory = std::move(context.customEmojiFactory);
 	context.customEmojiFactory = [
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		&textStyle
+		repaintRect = std::move(repaintRect),
+		originalCustomEmojiFactory = std::move(originalCustomEmojiFactory),
+		textStyle = textStylePtr,
+		st = stPtr
 	](
 			QStringView data,
 			const Ui::Text::MarkedContext &context
 	) -> std::unique_ptr<Ui::Text::CustomEmoji> {
 		const auto parsed = ParseInlineTextObjectEntity(data);
 		if (!parsed) {
-			return std::unique_ptr<Ui::Text::CustomEmoji>();
+			return originalCustomEmojiFactory
+				? originalCustomEmojiFactory(data, context)
+				: std::unique_ptr<Ui::Text::CustomEmoji>();
 		}
 		switch (parsed->kind) {
 		case InlineTextObjectKind::Formula: {
@@ -1189,7 +1161,11 @@ void SetTextLeaf(
 			const auto formula = std::get_if<InlineTextObjectFormulaData>(
 				&parsed->data);
 			return formula
-				? inlineFormulaObjects->create(*formula, textStyle, formulas)
+				? inlineFormulaObjects->create(
+					*formula,
+					*textStyle,
+					*st,
+					formulas)
 				: std::unique_ptr<Ui::Text::CustomEmoji>();
 		} break;
 		case InlineTextObjectKind::IvImage: {
@@ -1203,25 +1179,19 @@ void SetTextLeaf(
 					image->documentId,
 					QSize(image->width, image->height))
 				: nullptr;
-			const auto repaintRect = [&]() -> Fn<void(QRect)> {
-				if (const auto data = std::any_cast<InlineIvImageMarkedContext>(
-						&context.other)) {
-					return data->repaintRect;
-				}
-				return nullptr;
-			}();
 			return std::make_unique<InlineIvImageObject>(
 				image->replacementText,
 				image->width,
 				image->height,
 				std::move(resolved),
 				context.repaint,
-				std::move(repaintRect));
+				repaintRect);
 		}
 		}
 		return std::unique_ptr<Ui::Text::CustomEmoji>();
 	};
 	leaf->setMarkedText(textStyle, text, kIvMarkedTextOptions, context);
+	SetTextLeafSpoilerLinkFilter(leaf, std::move(spoilerLinkFilter));
 }
 
 } // namespace Iv::Markdown

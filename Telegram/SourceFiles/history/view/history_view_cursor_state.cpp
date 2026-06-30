@@ -27,7 +27,11 @@ TextState::TextState(
 	: CursorState::None)
 , link(state.link)
 , symbol(state.symbol)
-, afterSymbol(state.afterSymbol) {
+, afterSymbol(state.afterSymbol)
+, selectionCursor(MessageSelectionEndpoint::Flat({
+	state.symbol,
+	state.afterSymbol,
+})) {
 }
 
 TextState::TextState(
@@ -62,11 +66,38 @@ TextState::TextState(
 	: CursorState::None)
 , link(state.link)
 , symbol(state.symbol)
-, afterSymbol(state.afterSymbol) {
+, afterSymbol(state.afterSymbol)
+, selectionCursor(MessageSelectionEndpoint::Flat({
+	state.symbol,
+	state.afterSymbol,
+})) {
 }
 
 TextState::TextState(std::nullptr_t, ClickHandlerPtr link)
 : link(link) {
+}
+
+void SyncFlatSelectionCursor(not_null<TextState*> state) {
+	if (!state->selectionCursor.isRichPage()) {
+		state->selectionCursor = MessageSelectionEndpoint::Flat({
+			state->symbol,
+			state->afterSymbol,
+		});
+	}
+}
+
+void SetTextStatePosition(
+		not_null<TextState*> state,
+		uint16 symbol,
+		bool afterSymbol) {
+	state->symbol = symbol;
+	state->afterSymbol = afterSymbol;
+	SyncFlatSelectionCursor(state);
+}
+
+void AddTextStateOffset(not_null<TextState*> state, uint16 offset) {
+	state->symbol = uint16(state->symbol + offset);
+	SyncFlatSelectionCursor(state);
 }
 
 not_null<HistoryItem*> LookupItemByPoint(

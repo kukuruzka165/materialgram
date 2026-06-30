@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "data/data_messages.h"
 #include "history/view/history_view_element.h"
+#include "history/view/history_view_cursor_state.h"
+#include "history/view/history_view_keyboard_text_selection.h"
 #include "history/history_inner_widget_accessibility.h"
 #include "history/history_view_highlight_manager.h"
 #include "history/history_view_top_toast.h"
@@ -340,6 +342,8 @@ public:
 	[[nodiscard]] SelectedItems getSelectedItems() const;
 	[[nodiscard]] TextSelection getSelectedTextRange(
 		not_null<HistoryItem*> item) const;
+	[[nodiscard]] MessageSelection getSelectedTextSelection(
+		not_null<HistoryItem*> item) const;
 	void cancelSelection();
 	void selectItem(not_null<HistoryItem*> item);
 	void selectItemAsGroup(not_null<HistoryItem*> item);
@@ -370,6 +374,9 @@ public:
 	[[nodiscard]] not_null<HistoryItem*> lookupItemByPoint(
 		QPoint point,
 		not_null<Element*> view) const;
+	[[nodiscard]] bool canConsumeHorizontalScroll(
+		QPoint position,
+		int delta) const;
 
 	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(
 		int top) const;
@@ -442,10 +449,16 @@ public:
 		not_null<DocumentData*> document,
 		FullMsgId context,
 		bool showInMediaView = false) override;
+	bool elementScrollToLocalY(
+		not_null<const Element*> view,
+		int localTop) override;
 	void elementCancelUpload(const FullMsgId &context) override;
 	void elementShowTooltip(
 		const TextWithEntities &text,
 		Fn<void()> hiddenCallback) override;
+	void elementShowHiddenSenderTooltip(
+		FullMsgId itemId,
+		const TextWithEntities &text) override;
 	bool elementAnimationsPaused() override;
 	bool elementHideReply(not_null<const Element*> view) override;
 	bool elementShownUnread(not_null<const Element*> view) override;
@@ -701,7 +714,7 @@ private:
 	void clearSelected();
 	void setTextSelection(
 		not_null<Element*> view,
-		TextSelection selection);
+		MessageSelection selection);
 	int itemMinimalHeight() const;
 
 	bool isGoodForSelection(
@@ -737,7 +750,9 @@ private:
 		not_null<HistoryItem*> exactItem,
 		const MouseState &state) const;
 	bool requiredToStartDragging(not_null<Element*> view) const;
-	bool isPressInSelectedText(TextState state) const;
+	bool isPressInSelectedText(
+		not_null<const Element*> view,
+		TextState state) const;
 	void updateDragSelection();
 	void updateDragSelection(
 		const Element *fromView,
@@ -753,9 +768,14 @@ private:
 	void clearDragSelection();
 	void applyDragSelection();
 	void applyDragSelection(SelectedMap &applyTo) const;
-	TextSelection itemRenderSelection(
+	struct RenderSelectionState {
+		TextSelection selection;
+		bool fullMessageSelected = false;
+		const MessageSelection *messageSelection = nullptr;
+	};
+	[[nodiscard]] RenderSelectionState itemRenderSelection(
 		not_null<const Element*> view) const;
-	TextSelection computeRenderSelection(
+	[[nodiscard]] RenderSelectionState computeRenderSelection(
 		not_null<const SelectedMap*> selected,
 		not_null<const Element*> view) const;
 	void checkUnreadBarCreation(bool markLastAsRead = false);
@@ -884,15 +904,16 @@ private:
 	HistoryItem *_overItemExact = nullptr;
 	HistoryItem *_pressItemExact = nullptr;
 	CursorState _mouseCursorState = CursorState();
-	uint16 _mouseTextSymbol = 0;
+	TextState _mouseTextAnchor;
 	bool _pressWasInactive = false;
 	bool _overSenderUserpic = false;
 	bool _mouseActive = false;
 
 	bool _selectEnabled = false;
 	HistoryItem *_selectedTextItem = nullptr;
-	TextSelection _selectedTextRange;
+	MessageSelection _selectedTextSelection;
 	TextForMimeData _selectedText;
+	KeyboardTextSelection _keyboardTextSelection;
 	SelectedMap _selected;
 	base::flat_set<FullMsgId> _dragSelected;
 	DragSelectAction _dragSelectAction = DragSelectAction::None;
@@ -935,6 +956,7 @@ private:
 	Ui::DraggingScrollManager _selectScroll;
 
 	InfoTooltip _topToast;
+	AnchoredTooltip _hiddenSenderTooltip;
 
 	Ui::TouchScrollState _touchScrollState = Ui::TouchScrollState();
 	bool _touchPrevPosValid = false;

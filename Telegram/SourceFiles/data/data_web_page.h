@@ -164,3 +164,11 @@ private:
 	const not_null<Data::Session*> _owner;
 
 };
+
+[[nodiscard]] QString ExtractHash(
+	not_null<WebPageData*> webpage,
+	const TextWithEntities &text);
+
+[[nodiscard]] bool UrlMatchesWebPage(
+	not_null<WebPageData*> webpage,
+	const QString &url);

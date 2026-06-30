@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "core/version.h"
 #include "settings.h"
 
 enum {
@@ -22,8 +21,6 @@ enum {
 	PreloadHeightsCount = 1, // when 1 screen to scroll left make a preload request
 
 	SearchPeopleLimit = 5,
-
-	MaxMessageSize = 4096,
 
 	WebPageUserId = 701000,
 

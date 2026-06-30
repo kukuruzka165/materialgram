@@ -20,19 +20,26 @@ class Session;
 class PeerData;
 class PhotoData;
 class DocumentData;
+struct WebPageData;
 
 struct PollMedia {
 	PhotoData *photo = nullptr;
 	DocumentData *document = nullptr;
 	std::optional<Data::LocationPoint> geo;
+	WebPageData *webpage = nullptr;
+	QString url;
 
-	explicit operator bool() const { return photo || document || geo; }
+	explicit operator bool() const {
+		return photo || document || geo || !url.isEmpty();
+	}
 };
 
 inline bool operator==(const PollMedia &a, const PollMedia &b) {
 	return (a.photo == b.photo)
 		&& (a.document == b.document)
-		&& (a.geo == b.geo);
+		&& (a.geo == b.geo)
+		&& (a.webpage == b.webpage)
+		&& (a.url == b.url);
 }
 
 inline bool operator!=(const PollMedia &a, const PollMedia &b) {
@@ -53,7 +60,8 @@ struct PollAnswer {
 
 inline bool operator==(const PollAnswer &a, const PollAnswer &b) {
 	return (a.text == b.text)
-		&& (a.option == b.option);
+		&& (a.option == b.option)
+		&& (a.media == b.media);
 }
 
 inline bool operator!=(const PollAnswer &a, const PollAnswer &b) {

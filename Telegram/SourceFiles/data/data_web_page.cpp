@@ -192,8 +192,7 @@ WebPageType ParseWebPageType(
 }
 
 bool IgnoreIv(WebPageType type) {
-	return !Iv::ShowButton()
-		|| (type == WebPageType::Message)
+	return (type == WebPageType::Message)
 		|| (type == WebPageType::Album);
 }
 
@@ -202,6 +201,49 @@ WebPageType ParseWebPageType(const MTPDwebPage &page) {
 		qs(page.vtype().value_or_empty()),
 		page.vembed_url().value_or_empty(),
 		!!page.vcached_page());
+}
+
+namespace {
+
+[[nodiscard]] QString SimplifyUrl(const QString &url) {
+	auto result = url.split('#')[0].toLower();
+	if (result.endsWith('/')) {
+		result.chop(1);
+	}
+	const auto prefixes = { u"http://"_q, u"https://"_q };
+	for (const auto &prefix : prefixes) {
+		if (result.startsWith(prefix)) {
+			result = result.mid(prefix.size());
+			break;
+		}
+	}
+	return result;
+}
+
+} // namespace
+
+QString ExtractHash(
+		not_null<WebPageData*> webpage,
+		const TextWithEntities &text) {
+	const auto simplified = SimplifyUrl(webpage->url);
+	for (const auto &entity : text.entities) {
+		const auto link = (entity.type() == EntityType::Url)
+			? text.text.mid(entity.offset(), entity.length())
+			: (entity.type() == EntityType::CustomUrl)
+			? entity.data()
+			: QString();
+		if (SimplifyUrl(link) == simplified) {
+			const auto i = link.indexOf('#');
+			return (i > 0) ? link.mid(i + 1) : QString();
+		}
+	}
+	return QString();
+}
+
+bool UrlMatchesWebPage(
+		not_null<WebPageData*> webpage,
+		const QString &url) {
+	return SimplifyUrl(url) == SimplifyUrl(webpage->url);
 }
 
 WebPageCollage::WebPageCollage(
@@ -300,7 +342,8 @@ bool WebPageData::applyChanges(
 		&& document == newDocument
 		&& collage.items == newCollage.items
 		&& (!iv == !newIv)
-		&& (!iv || iv->partial() == newIv->partial())
+		&& (!iv || (iv->partial() == newIv->partial()
+			&& iv->hash() == newIv->hash()))
 		&& (!stickerSet == !newStickerSet)
 		&& (!uniqueGift == !newUniqueGift)
 		&& (!auction == !newAuction)

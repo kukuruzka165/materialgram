@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peer_list_box.h"
 
+#include "boxes/peer_list_section_headers.h"
+#include "boxes/peer_list_section_index.h"
 #include "history/history.h" // chatListNameSortKey.
 #include "main/session/session_show.h"
 #include "main/main_session.h"
@@ -244,6 +246,80 @@ void PeerListBox::keyPressEvent(QKeyEvent *e) {
 void PeerListBox::searchQueryChanged(const QString &query) {
 	scrollToY(0);
 	content()->searchQueryChanged(query);
+	refreshSectionIndex();
+}
+
+void PeerListBox::peerListSetShowSectionHeaders(bool shown) {
+	PeerListContentDelegate::peerListSetShowSectionHeaders(shown);
+	if (!shown) {
+		if (_sectionIndex) {
+			_sectionIndex.destroy();
+		}
+		return;
+	}
+	if (!_sectionIndex) {
+		_sectionIndex.create(this);
+		_sectionIndex->setJumpCallback([=](
+				int contentTop,
+				anim::type animated) {
+			scrollTo({ contentTop, contentTop + scrollHeight() }, animated);
+		});
+		_sectionIndex->setScrollCallback([=](not_null<QWheelEvent*> e) {
+			sendScrollViewportEvent(e);
+		});
+		content()->heightValue(
+		) | rpl::on_next([=] {
+			refreshSectionIndex();
+		}, _sectionIndex->lifetime());
+		scrolls(
+		) | rpl::on_next([=] {
+			if (_sectionIndex && !_sectionIndex->isHidden()) {
+				_sectionIndex->setVisibleLetters(
+					content()->visibleSectionLetters());
+			}
+		}, _sectionIndex->lifetime());
+	}
+	refreshSectionIndex();
+}
+
+void PeerListBox::refreshSectionIndex() {
+	if (!_sectionIndex) {
+		return;
+	}
+	auto letters = content()->sectionLetters();
+	const auto shown = (letters.size() >= 2);
+	if (shown) {
+		auto entries = std::vector<PeerListSectionIndex::Entry>();
+		entries.reserve(letters.size());
+		for (auto &letter : letters) {
+			entries.push_back({
+				std::move(letter.letter),
+				letter.contentTop,
+			});
+		}
+		_sectionIndex->setLetters(std::move(entries));
+		_sectionIndex->setVisibleLetters(content()->visibleSectionLetters());
+		updateSectionIndexGeometry();
+	}
+	_sectionIndex->setVisible(shown);
+}
+
+void PeerListBox::updateSectionIndexGeometry() {
+	if (!_sectionIndex) {
+		return;
+	}
+	const auto skip = topScrollSkip();
+	const auto indexWidth = _sectionIndex->idealWidth();
+	const auto scrollBar = st::boxScroll.width;
+	const auto left = style::RightToLeft()
+		? scrollBar
+		: (width() - scrollBar - indexWidth);
+	_sectionIndex->setGeometry(
+		left,
+		skip,
+		indexWidth,
+		height() - skip);
+	_sectionIndex->raise();
 }
 
 void PeerListBox::resizeEvent(QResizeEvent *e) {
@@ -255,6 +331,7 @@ void PeerListBox::resizeEvent(QResizeEvent *e) {
 	}
 
 	content()->resizeToWidth(width());
+	updateSectionIndexGeometry();
 }
 
 void PeerListBox::paintEvent(QPaintEvent *e) {
@@ -778,6 +855,17 @@ PaintRoundImageCallback PeerListRow::generatePaintUserpicCallback(
 }
 
 
+void PeerListRow::rememberUserpicKey() {
+	if (!special()) {
+		_userpicKey = peer()->userpicUniqueKey(ensureUserpicView());
+	}
+}
+
+bool PeerListRow::userpicKeyChanged() {
+	return !special()
+		&& (peer()->userpicUniqueKey(ensureUserpicView()) != _userpicKey);
+}
+
 auto PeerListRow::generateNameFirstLetters() const
 -> const base::flat_set<QChar> & {
 	return peer()->nameFirstLetters();
@@ -809,6 +897,7 @@ int PeerListRow::paintNameIconGetWidth(
 		int availableWidth,
 		int outerWidth,
 		bool selected) {
+	_statusIconRect = QRect();
 	if (_skipPeerBadge
 		|| special()
 		|| !_savedMessagesStatus.isEmpty()
@@ -816,7 +905,7 @@ int PeerListRow::paintNameIconGetWidth(
 		|| _isVerifyCodesChat) {
 		return 0;
 	}
-	return _badge.drawGetWidth(p, {
+	const auto width = _badge.drawGetWidth(p, {
 		.peer = peer(),
 		.rectForName = QRect(
 			nameLeft,
@@ -842,6 +931,8 @@ int PeerListRow::paintNameIconGetWidth(
 		.now = now,
 		.paused = false,
 	});
+	_statusIconRect = _badge.emojiStatusRect();
+	return width;
 }
 
 int PeerListRow::paintNameIconGetLeadingWidth(
@@ -878,6 +969,10 @@ int PeerListRow::paintNameIconGetLeadingWidth(
 		QPoint(nameLeft, nameTop),
 		st);
 	return skip;// ? skip + st::dialogsChatTypeSkip) : 0;
+}
+
+void PeerListRow::paintStatusIcon(Painter &p, crl::time now, bool paused) {
+	_badge.paintEmojiStatusFrame(p, now, paused);
 }
 
 void PeerListRow::paintStatusText(
@@ -940,6 +1035,7 @@ void PeerListRow::paintUserpic(
 	} else if (const auto callback = generatePaintUserpicCallback(false)) {
 		callback(p, x, y, outerWidth, st.photoSize);
 	}
+	rememberUserpicKey();
 	paintUserpicOverlay(p, st, x, y, outerWidth);
 }
 
@@ -1058,9 +1154,11 @@ PeerListContent::PeerListContent(
 : RpWidget(parent)
 , _st(controller->computeListSt())
 , _controller(controller)
-, _rowHeight(_st.item.height) {
+, _rowHeight(_st.item.height)
+, _rowsScrollCache([this] { update(); }) {
 	_controller->session().downloaderTaskFinished(
 	) | rpl::on_next([=] {
+		invalidateLoadedUserpics();
 		update();
 	}, lifetime());
 
@@ -1072,6 +1170,7 @@ PeerListContent::PeerListContent(
 			handleNameChanged(update.peer);
 		}
 		if (update.flags & UpdateFlag::Photo) {
+			invalidateLoadedUserpics();
 			this->update();
 		}
 	}, lifetime());
@@ -1297,9 +1396,11 @@ std::optional<QPoint> PeerListContent::lastRowMousePosition() const {
 	auto in = parentWidget()->rect().contains(
 		parentWidget()->mapFromGlobal(*_lastMousePosition));
 	auto rowsPointY = point.y() - rowsTop();
-	const auto index = (in
-		&& rowsPointY >= 0
-		&& rowsPointY < shownRowsCount() * _rowHeight)
+	const auto index = (!in || rowsPointY < 0)
+		? -1
+		: sectionsShown()
+		? _sections->rowFromY(rowsPointY)
+		: (rowsPointY < shownRowsCount() * _rowHeight)
 		? (rowsPointY / _rowHeight)
 		: -1;
 	return (index >= 0 && index == _selected.index.value)
@@ -1552,17 +1653,43 @@ void PeerListContent::paintEvent(QPaintEvent *e) {
 	const auto yTo = clip.y() + clip.height() - rowsTopCached;
 	p.translate(0, rowsTopCached);
 	const auto count = shownRowsCount();
-	if (count > 0) {
+	const auto handleRepaintAfter = [&](crl::time repaintAfter) {
+		if (repaintAfter > 0
+			&& (repaintAfterMin < 0
+				|| repaintAfterMin > repaintAfter)) {
+			repaintAfterMin = repaintAfter;
+		}
+	};
+	if (count > 0 && sectionsShown()) {
+		const auto headerHeight = st::contactsSortHeaderHeight;
+		for (auto index = 0; index != count; ++index) {
+			const auto top = _sections->contentTop(index);
+			if (top >= yTo) {
+				break;
+			}
+			const auto hasHeader = _sections->hasHeader(index);
+			const auto headerTop = hasHeader ? (top - headerHeight) : top;
+			if (top + _rowHeight <= yFrom && headerTop <= yFrom) {
+				continue;
+			}
+			if (hasHeader) {
+				p.translate(0, headerTop);
+				_sections->paint(
+					p,
+					width(),
+					getRow(RowIndex(index))->section());
+				p.translate(0, -headerTop);
+			}
+			p.translate(0, top);
+			handleRepaintAfter(paintRow(p, now, RowIndex(index)));
+			p.translate(0, -top);
+		}
+	} else if (count > 0) {
 		const auto from = floorclamp(yFrom, _rowHeight, 0, count);
 		const auto to = ceilclamp(yTo, _rowHeight, 0, count);
 		p.translate(0, from * _rowHeight);
 		for (auto index = from; index != to; ++index) {
-			const auto repaintAfter = paintRow(p, now, RowIndex(index));
-			if (repaintAfter > 0
-				&& (repaintAfterMin < 0
-					|| repaintAfterMin > repaintAfter)) {
-				repaintAfterMin = repaintAfter;
-			}
+			handleRepaintAfter(paintRow(p, now, RowIndex(index)));
 			p.translate(0, _rowHeight);
 		}
 	}
@@ -1575,6 +1702,7 @@ void PeerListContent::paintEvent(QPaintEvent *e) {
 int PeerListContent::resizeGetHeight(int newWidth) {
 	const auto rowsCount = shownRowsCount();
 	const auto hideAll = !rowsCount && _hideEmpty;
+	refreshSectionHeaders();
 	_aboveHeight = 0;
 	if (_aboveWidget) {
 		_aboveWidget->resizeToWidth(newWidth);
@@ -1598,7 +1726,7 @@ int PeerListContent::resizeGetHeight(int newWidth) {
 	}
 	const auto labelTop = rowsTop()
 		+ std::max(
-			shownRowsCount() * _rowHeight,
+			sectionsFullHeight(),
 			_controller->descriptionTopSkipMin());
 	const auto labelWidth = newWidth - 2 * st::contactsPadding.left();
 	if (_description) {
@@ -1862,7 +1990,6 @@ crl::time PeerListContent::paintRow(
 		? std::max(refreshStatusAt - now, crl::time(1))
 		: 0;
 
-	const auto peer = row->special() ? nullptr : row->peer().get();
 	const auto active = (_contexted.index.value >= 0)
 		? _contexted
 		: (_pressed.index.value >= 0)
@@ -1875,6 +2002,48 @@ crl::time PeerListContent::paintRow(
 		_controller->customRowPaint(p, now, row, selected);
 		return refreshStatusIn;
 	}
+
+	const auto activeElement = (active.index == index) ? active.element : 0;
+	if (_rowsScrollCache.scrolling()
+		&& !selected
+		&& !activeElement
+		&& width() > 0
+		&& row->opacity() == 1.) {
+		const auto ratio = style::DevicePixelRatio();
+		_rowsScrollCache.paintRow(
+			p,
+			row->id(),
+			QSize(width(), _rowHeight) * ratio,
+			ratio,
+			[&](QImage &image) {
+				auto q = Painter(&image);
+				paintRowContent(q, now, index, false, 0);
+				const auto statusRect = row->statusIconRect();
+				if (!statusRect.isEmpty()) {
+					q.fillRect(statusRect, st.button.textBg);
+				}
+			});
+		if (!row->statusIconRect().isEmpty()) {
+			row->paintStatusIcon(p, now, false);
+		}
+		return refreshStatusIn;
+	}
+	paintRowContent(p, now, index, selected, activeElement);
+	return refreshStatusIn;
+}
+
+void PeerListContent::paintRowContent(
+		Painter &p,
+		crl::time now,
+		RowIndex index,
+		bool selected,
+		int activeElement) {
+	const auto row = getRow(index);
+	Assert(row != nullptr);
+
+	const auto &st = row->computeSt(_st.item);
+	const auto outerWidth = width();
+	const auto peer = row->special() ? nullptr : row->peer().get();
 
 	const auto opacity = row->opacity();
 	const auto &bg = selected
@@ -1942,7 +2111,7 @@ crl::time PeerListContent::paintRow(
 	namew -= leading;
 	namew -= row->paintNameIconGetWidth(
 		p,
-		[=] { updateRow(row); },
+		[=] { updateRowStatus(row); },
 		now,
 		namex + leading,
 		namey,
@@ -1987,9 +2156,7 @@ crl::time PeerListContent::paintRow(
 		p,
 		width(),
 		selected,
-		(active.index == index) ? active.element : 0);
-
-	return refreshStatusIn;
+		activeElement);
 }
 
 PeerListContent::SkipResult PeerListContent::selectSkip(int direction) {
@@ -2157,6 +2324,32 @@ void PeerListContent::loadProfilePhotos() {
 	}
 }
 
+void PeerListContent::invalidateLoadedUserpics() {
+	if (!_rowsScrollCache.scrolling() || _visibleTop >= _visibleBottom) {
+		return;
+	}
+	const auto rowsCount = shownRowsCount();
+	if (rowsCount <= 0) {
+		return;
+	}
+	auto from = _visibleTop / _rowHeight;
+	if (from < 0) {
+		from = 0;
+	} else if (from >= rowsCount) {
+		return;
+	}
+	auto to = (_visibleBottom / _rowHeight) + 1;
+	if (to > rowsCount) {
+		to = rowsCount;
+	}
+	for (auto index = from; index != to; ++index) {
+		const auto row = getRow(RowIndex(index));
+		if (row->userpicKeyChanged()) {
+			_rowsScrollCache.invalidate(row->id());
+		}
+	}
+}
+
 void PeerListContent::checkScrollForPreload() {
 	if (_visibleBottom + PreloadHeightsCount * (_visibleBottom - _visibleTop) >= height()) {
 		_controller->loadMoreRows();
@@ -2318,6 +2511,10 @@ void PeerListContent::setIgnoreHiddenRowsOnSearch(bool value) {
 void PeerListContent::visibleTopBottomUpdated(
 		int visibleTop,
 		int visibleBottom) {
+	if ((_visibleTop != visibleTop || _visibleBottom != visibleBottom)
+		&& _mode != Mode::Custom) {
+		_rowsScrollCache.markScrolling();
+	}
 	_visibleTop = visibleTop;
 	_visibleBottom = visibleBottom;
 	loadProfilePhotos();
@@ -2377,9 +2574,11 @@ void PeerListContent::selectByMouse(QPoint globalPosition) {
 	auto in = parentWidget()->rect().contains(parentWidget()->mapFromGlobal(globalPosition));
 	auto selected = Selected();
 	auto rowsPointY = point.y() - rowsTop();
-	selected.index.value = (in
-		&& rowsPointY >= 0
-		&& rowsPointY < shownRowsCount() * _rowHeight)
+	selected.index.value = (!in || rowsPointY < 0)
+		? -1
+		: sectionsShown()
+		? _sections->rowFromY(rowsPointY)
+		: (rowsPointY < shownRowsCount() * _rowHeight)
 		? (rowsPointY / _rowHeight)
 		: -1;
 	if (selected.index.value >= 0) {
@@ -2424,9 +2623,86 @@ int PeerListContent::rowsTop() const {
 
 int PeerListContent::getRowTop(RowIndex index) const {
 	if (index.value >= 0) {
-		return rowsTop() + index.value * _rowHeight;
+		return sectionsShown()
+			? (rowsTop() + _sections->contentTop(index.value))
+			: (rowsTop() + index.value * _rowHeight);
 	}
 	return -1;
+}
+
+bool PeerListContent::sectionsShown() const {
+	return _sections && !showingSearch();
+}
+
+void PeerListContent::setShowSectionHeaders(bool shown) {
+	if ((_sections != nullptr) == shown) {
+		return;
+	}
+	_sections = shown
+		? std::make_unique<PeerListSectionHeaders>()
+		: nullptr;
+	resizeToWidth(width());
+	update();
+}
+
+void PeerListContent::refreshSectionHeaders() {
+	if (!sectionsShown()) {
+		if (_sections) {
+			_sections->clear();
+		}
+		return;
+	}
+	_sections->rebuild(shownRowsCount(), _rowHeight, [&](int index) {
+		return getRow(RowIndex(index))->section();
+	});
+}
+
+int PeerListContent::sectionsFullHeight() const {
+	return sectionsShown()
+		? _sections->fullHeight()
+		: (shownRowsCount() * _rowHeight);
+}
+
+std::vector<PeerListContent::SectionLetter> PeerListContent::sectionLetters(
+		) const {
+	auto result = std::vector<SectionLetter>();
+	if (!sectionsShown()) {
+		return result;
+	}
+	const auto count = shownRowsCount();
+	for (auto i = 0; i != count; ++i) {
+		if (_sections->hasHeader(i)) {
+			result.push_back({
+				rowAt(i)->section(),
+				getRowTop(RowIndex(i)) - st::contactsSortHeaderHeight,
+			});
+		}
+	}
+	return result;
+}
+
+base::flat_set<QString> PeerListContent::visibleSectionLetters() const {
+	auto result = base::flat_set<QString>();
+	const auto count = shownRowsCount();
+	if (!sectionsShown() || !count) {
+		return result;
+	}
+	auto low = 0, high = count;
+	while (low < high) {
+		const auto middle = (low + high) / 2;
+		if (getRowTop(RowIndex(middle)) + _rowHeight <= _visibleTop) {
+			low = middle + 1;
+		} else {
+			high = middle;
+		}
+	}
+	for (auto i = low; i != count; ++i) {
+		if (getRowTop(RowIndex(i)) >= _visibleBottom) {
+			break;
+		}
+		result.emplace(rowAt(i)->section());
+	}
+	return result;
 }
 
 void PeerListContent::updateRow(not_null<PeerListRow*> row, RowIndex hint) {
@@ -2449,6 +2725,19 @@ void PeerListContent::updateRow(RowIndex index) {
 		}
 	}
 	update(0, getRowTop(index), width(), _rowHeight);
+}
+
+void PeerListContent::updateRowStatus(not_null<PeerListRow*> row) {
+	const auto index = findRowIndex(row);
+	if (index.value < 0) {
+		return;
+	}
+	const auto rect = row->statusIconRect();
+	if (_rowsScrollCache.scrolling() && !rect.isEmpty()) {
+		update(rect.translated(0, getRowTop(index)));
+	} else {
+		updateRow(index);
+	}
 }
 
 template <typename Callback>

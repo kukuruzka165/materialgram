@@ -1036,15 +1036,29 @@ void WrapWidget::resizeEvent(QResizeEvent *e) {
 }
 
 void WrapWidget::keyPressEvent(QKeyEvent *e) {
+	if (_content && _content->processZoomKey(e)) {
+		return;
+	}
 	if (e->key() == Qt::Key_Escape || e->key() == Qt::Key_Back) {
-		checkBeforeCloseByEscape((hasStackHistory() || wrap() != Wrap::Layer)
-			? Fn<void()>([=] { _controller->showBackFromStack(); })
-			: Fn<void()>([=] {
-				_controller->parentController()->hideSpecialLayer();
-			}));
+		if (!closeByBackButton()) {
+			checkBeforeCloseByEscape(
+				[=] { _controller->showBackFromStack(); });
+		}
 		return;
 	}
 	SectionWidget::keyPressEvent(e);
+}
+
+bool WrapWidget::closeByBackButton() {
+	if (!hasStackHistory() && wrap() != Wrap::Layer) {
+		return false;
+	}
+	checkBeforeCloseByEscape(hasStackHistory()
+		? Fn<void()>([=] { _controller->showBackFromStack(); })
+		: Fn<void()>([=] {
+			_controller->parentController()->hideSpecialLayer();
+		}));
+	return true;
 }
 
 void WrapWidget::updateContentGeometry() {

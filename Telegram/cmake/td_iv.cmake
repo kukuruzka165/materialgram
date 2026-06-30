@@ -11,14 +11,25 @@ add_library(tdesktop::td_iv ALIAS td_iv)
 target_precompile_headers(td_iv PRIVATE ${src_loc}/iv/iv_pch.h)
 nice_target_sources(td_iv ${src_loc}
 PRIVATE
+#    iv/editor/iv_editor_box.cpp
+#    iv/editor/iv_editor_box.h
+#    iv/editor/iv_editor_clipboard.cpp
+#    iv/editor/iv_editor_clipboard.h
+#    iv/editor/iv_editor_state.cpp
+#    iv/editor/iv_editor_state.h
+#    iv/editor/iv_editor_text_entities.cpp
+#    iv/editor/iv_editor_text_entities.h
+#    iv/editor/iv_editor_widget.cpp
+#    iv/editor/iv_editor_widget.h
+#    iv/editor/iv_editor_window.cpp
+#    iv/editor/iv_editor_window.h
+
     iv/iv_controller.cpp
     iv/iv_controller.h
     iv/iv_data.cpp
     iv/iv_data.h
     iv/iv_delegate.h
     iv/iv_pch.h
-    iv/iv_prepare.cpp
-    iv/iv_prepare.h
     iv/iv_zoom_controls.cpp
     iv/iv_zoom_controls.h
 )
@@ -63,6 +74,8 @@ PRIVATE
     iv/markdown/iv_markdown_parse_validate.h
     iv/markdown/iv_markdown_media_block.cpp
     iv/markdown/iv_markdown_media_block.h
+    iv/markdown/iv_markdown_media_reuse.cpp
+    iv/markdown/iv_markdown_media_reuse.h
     iv/markdown/iv_markdown_prepare.cpp
     iv/markdown/iv_markdown_prepare.h
     iv/markdown/iv_markdown_prepare_blocks.cpp
@@ -92,12 +105,6 @@ PRIVATE
     desktop-app::external_cmark_gfm
     desktop-app::external_microtex
     desktop-app::lib_spellcheck
-)
-
-nice_target_sources(td_iv ${res_loc}
-PRIVATE
-    iv_html/page.css
-    iv_html/page.js
 )
 
 target_include_directories(td_iv

@@ -101,6 +101,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_calls.h"
 #include "styles/style_channel_earn.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_credits.h"
 #include "styles/style_giveaway.h"
 #include "styles/style_info.h"
@@ -1092,7 +1093,11 @@ void FillUniqueGiftMenu(
 		const auto url = show->session().createInternalLinkFull(local);
 		menu->addAction(tr::lng_context_copy_link(tr::now), [=] {
 			TextUtilities::SetClipboardText({ url });
-			show->showToast(tr::lng_channel_public_link_copied(tr::now));
+			show->showToast({
+				.text = { tr::lng_channel_public_link_copied(tr::now) },
+				.iconLottie = u"toast/voip_invite"_q,
+				.iconLottieSize = st::toastLottieIconSize,
+			});
 		}, st.link ? st.link : &st::menuIconLink);
 
 		const auto shareBoxSt = st.shareBox;
@@ -3414,8 +3419,13 @@ void AddWithdrawalWidget(
 					tr::lng_context_copy_link(tr::now),
 					[=, show = controller->uiShow()] {
 						TextUtilities::SetClipboardText({ urlState->url });
-						show->showToast(
-							tr::lng_channel_public_link_copied(tr::now));
+						show->showToast({
+							.text = {
+								tr::lng_channel_public_link_copied(tr::now),
+							},
+							.iconLottie = u"toast/voip_invite"_q,
+							.iconLottieSize = st::toastLottieIconSize,
+						});
 					},
 					&st::menuIconCopy);
 				urlState->menu->popup(QCursor::pos());

@@ -82,6 +82,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/ui_utility.h"
 #include "ui/text/format_values.h"
+#include "ui/text/text_custom_emoji.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_variant.h"
 #include "ui/toast/toast.h"
@@ -102,6 +103,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_channel_earn.h" // st::channelEarnCurrencyCommonMargins
+#include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -116,6 +118,7 @@ namespace Profile {
 namespace {
 
 constexpr auto kDay = Data::WorkingInterval::kDay;
+constexpr auto kPeerIdLinkIndex = uint16(1);
 
 class DraggableUrlClickHandler final : public UrlClickHandler {
 public:
@@ -206,8 +209,13 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 		if (!link.isEmpty()) {
 			TextUtilities::SetClipboardText({ link });
 			if (const auto strong = weak.get()) {
-				strong->showToast(
-					tr::lng_channel_public_link_copied(tr::now));
+				strong->showToast({
+					.text = {
+						tr::lng_channel_public_link_copied(tr::now),
+					},
+					.iconLottie = u"toast/voip_invite"_q,
+					.iconLottieSize = st::toastLottieIconSize,
+				});
 			}
 		}
 	};
@@ -233,7 +241,7 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 			const auto raw = peer->id.value & PeerId::kChatTypeMask;
 			value.append(Link(
 				Italic(Lang::FormatCountDecimal(raw)),
-				"internal:~peer_id~:copy:" + QString::number(raw)));
+				kPeerIdLinkIndex));
 		}
 		if (ShowChannelJoinedBelowAbout.value()) {
 			if (const auto channel = peer->asChannel()) {
@@ -261,6 +269,24 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 		}
 		return std::move(value);
 	});
+}
+
+void SetupAboutPeerIdDrag(
+		not_null<Ui::FlatLabel*> label,
+		not_null<PeerData*> peer) {
+	if (!ShowPeerIdBelowAbout.value()) {
+		return;
+	}
+	const auto id = QString::number(peer->id.value & PeerId::kChatTypeMask);
+	AboutValue(
+		peer
+	) | rpl::on_next([=] {
+		label->setLink(
+			kPeerIdLinkIndex,
+			std::make_shared<DraggableUrlClickHandler>(
+				u"internal:~peer_id~:copy:"_q + id,
+				id));
+	}, label->lifetime());
 }
 
 [[nodiscard]] bool AreNonTrivialHours(const Data::WorkingHours &hours) {
@@ -1231,11 +1257,10 @@ private:
 	[[nodiscard]] Section makePersonalChannel(not_null<UserData*> user);
 	[[nodiscard]] Section makeInfo();
 	[[nodiscard]] Section makeAddAsContact(not_null<UserData*> user);
-	[[nodiscard]] Section makeBotVerifyDivider();
-	[[nodiscard]] Section makeMainApp(not_null<UserData*> user);
+	void addBotVerify();
+	void addMainApp(not_null<UserData*> user);
 	[[nodiscard]] Section makeBotPermissions(not_null<UserData*> user);
-	[[nodiscard]] Section makeManagedBotFooter(
-		not_null<UserData*> managerUser);
+	void addManagedBotFooter(not_null<UserData*> managerUser);
 	[[nodiscard]] Section makeReportOrDeleteReaction();
 	[[nodiscard]] Section makeViewChannel(not_null<ChannelData*> channel);
 	[[nodiscard]] Section makeTopicsList(not_null<Data::Forum*> forum);
@@ -1482,14 +1507,16 @@ Section DetailsFiller::makeInfo() {
 			v::text::data &&label,
 			rpl::producer<TextWithEntities> &&text,
 			const style::FlatLabel &textSt = st::infoLabeled,
-			const style::margins &padding = st::infoProfileLabeledPadding) {
+			const style::margins &padding = st::infoProfileLabeledPadding,
+			const style::PopupMenu &stMenu = st::defaultPopupMenu) {
 		auto line = CreateTextWithLabel(
 			result,
 			v::text::take_marked(std::move(label)),
 			std::move(text),
 			st::infoLabel,
 			textSt,
-			padding);
+			padding,
+			stMenu);
 		tracker.track(result->add(std::move(line.wrap)));
 
 		line.text->setClickHandlerFilter(infoClickFilter);
@@ -1499,23 +1526,27 @@ Section DetailsFiller::makeInfo() {
 			v::text::data &&label,
 			rpl::producer<TextWithEntities> &&text,
 			const style::FlatLabel &textSt = st::infoLabeled,
-			const style::margins &padding = st::infoProfileLabeledPadding) {
+			const style::margins &padding = st::infoProfileLabeledPadding,
+			const style::PopupMenu &stMenu = st::defaultPopupMenu) {
 		return addInfoLineGeneric(
 			std::move(label),
 			std::move(text),
 			textSt,
-			padding);
+			padding,
+			stMenu);
 	};
 	const auto addInfoOneLine = [&](
 			v::text::data &&label,
 			rpl::producer<TextWithEntities> &&text,
 			const QString &contextCopyText,
-			const style::margins &padding = st::infoProfileLabeledPadding) {
+			const style::margins &padding = st::infoProfileLabeledPadding,
+			const style::PopupMenu &stMenu = st::defaultPopupMenu) {
 		auto result = addInfoLine(
 			std::move(label),
 			std::move(text),
 			st::infoLabeledOneLine,
-			padding);
+			padding,
+			stMenu);
 		result.text->setDoubleClickSelectsParagraph(true);
 		result.text->setContextCopyText(contextCopyText);
 		return result;
@@ -1561,8 +1592,13 @@ Section DetailsFiller::makeInfo() {
 				[=] {
 					TextUtilities::SetClipboardText({ url });
 					if (const auto strong = weak.get()) {
-						strong->showToast(
-							tr::lng_channel_public_link_copied(tr::now));
+						strong->showToast({
+							.text = {
+								tr::lng_channel_public_link_copied(tr::now),
+							},
+							.iconLottie = u"toast/voip_invite"_q,
+							.iconLottieSize = st::toastLottieIconSize,
+						});
 					}
 				});
 			request.menu->addAction(
@@ -1614,32 +1650,35 @@ Section DetailsFiller::makeInfo() {
 		if (!user->isSelf()) {
 			const auto phoneLabel = addInfoOneLine(
 				tr::lng_info_mobile_label(),
-				PhoneOrHiddenValue(user),
-				tr::lng_profile_copy_phone(tr::now)).text;
+				PhoneWithSpoilerValue(user, PhoneOrHiddenValue(user)),
+				tr::lng_profile_copy_phone(tr::now),
+				st::infoProfileLabeledPadding,
+				st::popupMenuWithIcons).text;
 			const auto hook = [=](Ui::FlatLabel::ContextMenuRequest request) {
 				if (request.selection.empty()) {
 					const auto callback = [=] {
-						auto phone = rpl::variable<TextWithEntities>(
-							PhoneOrHiddenValue(user)).current().text;
-						phone.replace(' ', QString()).replace('-', QString());
-						TextUtilities::SetClipboardText({ phone });
+						CopyPhoneToClipboard(PhoneOrHiddenValue(user));
 					};
 					request.menu->addAction(
 						tr::lng_profile_copy_phone(tr::now),
-						callback);
+						callback,
+						&st::menuIconCopy);
 				} else {
 					phoneLabel->fillContextMenu(request);
 				}
 				AddPhoneMenu(request.menu, user);
+				AddPhoneSpoilerMenu(request.menu, user);
 			};
 			phoneLabel->setContextMenuHook(hook);
 		}
 		auto label = user->isBot()
 			? tr::lng_info_about_label()
 			: tr::lng_info_bio_label();
-		addTranslateToMenu(
-			addInfoLine(std::move(label), AboutWithAdvancedValue(user)).text,
+		const auto about = addInfoLine(
+			std::move(label),
 			AboutWithAdvancedValue(user));
+		addTranslateToMenu(about.text, AboutWithAdvancedValue(user));
+		SetupAboutPeerIdDrag(about.text, user);
 
 		const auto usernameLine = addInfoOneLine(
 			UsernamesSubtext(_peer, tr::lng_info_username_label()),
@@ -1816,6 +1855,7 @@ Section DetailsFiller::makeInfo() {
 			: AboutWithAdvancedValue(_peer));
 		if (!_topic) {
 			addTranslateToMenu(about.text, AboutWithAdvancedValue(_peer));
+			SetupAboutPeerIdDrag(about.text, _peer);
 		}
 
 		if (_peer->hasUserpic() && Core::App().settings().datacenterEnabled()) {
@@ -1831,7 +1871,6 @@ Section DetailsFiller::makeInfo() {
 	return Section{
 		.widget = std::move(wrap),
 		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::None(),
 	};
 }
 
@@ -2177,11 +2216,10 @@ Section DetailsFiller::makePersonalChannel(not_null<UserData*> user) {
 	return Section{
 		.widget = std::move(result),
 		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::None(),
 	};
 }
 
-Section DetailsFiller::makeMainApp(not_null<UserData*> user) {
+void DetailsFiller::addMainApp(not_null<UserData*> user) {
 	const auto parent = _stack->layout();
 	auto wrap = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 		parent,
@@ -2230,13 +2268,15 @@ Section DetailsFiller::makeMainApp(not_null<UserData*> user) {
 			return false;
 		});
 	};
-	return Section{
+
+	_stack->add(Section{
 		.widget = std::move(wrap),
 		.shown = rpl::single(true),
-		.trailing = SectionSeparator::Text(
-			std::move(textProducer),
-			std::move(setup)),
-	};
+	});
+	_stack->addTextSeparator(
+		std::move(textProducer),
+		rpl::single(true),
+		std::move(setup));
 }
 
 Section DetailsFiller::makeBotPermissions(not_null<UserData*> user) {
@@ -2274,7 +2314,6 @@ Section DetailsFiller::makeBotPermissions(not_null<UserData*> user) {
 	return Section{
 		.widget = std::move(wrap),
 		.shown = rpl::single(true),
-		.trailing = SectionSeparator::None(),
 	};
 }
 
@@ -2298,18 +2337,11 @@ Section DetailsFiller::makeAddAsContact(not_null<UserData*> user) {
 	return Section{
 		.widget = std::move(wrap),
 		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::None(),
 	};
 }
 
-Section DetailsFiller::makeBotVerifyDivider() {
+void DetailsFiller::addBotVerify() {
 	const auto peer = _peer.get();
-	const auto parent = _stack->layout();
-	auto wrap = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-		parent,
-		object_ptr<Ui::VerticalLayout>(parent));
-	const auto raw = wrap.data();
-
 	auto shown = peer->session().changes().peerFlagsValue(
 		peer,
 		Data::PeerUpdate::Flag::VerifyInfo
@@ -2335,56 +2367,33 @@ Section DetailsFiller::makeBotVerifyDivider() {
 		return info ? info->description : TextWithEntities();
 	});
 
-	raw->toggleOn(std::move(shown), anim::type::instant);
-	raw->finishAnimating();
-	return Section{
-		.widget = std::move(wrap),
-		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::Text(std::move(description)),
-	};
+	_stack->addTextSeparator(std::move(description), std::move(shown));
 }
 
-Section DetailsFiller::makeManagedBotFooter(
-		not_null<UserData*> managerUser) {
-	const auto parent = _stack->layout();
-	auto wrap = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-		parent,
-		object_ptr<Ui::VerticalLayout>(parent));
-	const auto raw = wrap.data();
-	const auto inner = raw->entity();
+void DetailsFiller::addManagedBotFooter(not_null<UserData*> managerUser) {
 	const auto botUsername = managerUser->username();
 	const auto linkText = botUsername.isEmpty()
 		? managerUser->name()
 		: (u"@"_q + botUsername);
-	auto label = object_ptr<Ui::FlatLabel>(
-		inner,
-		tr::lng_managed_bot_label(
-			lt_icon,
-			rpl::single(Ui::Text::IconEmoji(&st::managedBotIconEmoji)),
-			lt_bot,
-			rpl::single(tr::link(linkText)),
-			tr::marked),
-		st::defaultDividerLabel.label);
-	const auto flatLabel = label.data();
-	inner->add(object_ptr<Ui::DividerLabel>(
-		inner,
-		std::move(label),
-		st::defaultBoxDividerLabelPadding,
-		st::defaultDividerLabel.bar,
-		RectPart::Top | RectPart::Bottom));
+	auto text = tr::lng_managed_bot_label(
+		lt_icon,
+		rpl::single(Ui::Text::IconEmoji(&st::managedBotIconEmoji)),
+		lt_bot,
+		rpl::single(tr::link(linkText)),
+		tr::marked);
 	const auto weak = base::make_weak(_controller);
-	flatLabel->setClickHandlerFilter([=](const auto &...) {
-		if (const auto strong = weak.get()) {
-			strong->showPeerInfo(managerUser);
-		}
-		return false;
-	});
-	return Section{
-		.widget = std::move(wrap),
-		.shown = rpl::single(true),
-		.trailing = SectionSeparator::None(),
-		.embedsLeadingSeparator = true,
+	auto setup = [=](not_null<Ui::FlatLabel*> label) {
+		label->setClickHandlerFilter([=](const auto &...) {
+			if (const auto strong = weak.get()) {
+				strong->showPeerInfo(managerUser);
+			}
+			return false;
+		});
 	};
+	_stack->addTextSeparator(
+		std::move(text),
+		rpl::single(true),
+		std::move(setup));
 }
 
 Section DetailsFiller::makeReportOrDeleteReaction() {
@@ -2435,7 +2444,6 @@ Section DetailsFiller::makeDeleteReactionSection(GroupReactionOrigin data) {
 	return Section{
 		.widget = std::move(wrap),
 		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::None(),
 	};
 }
 
@@ -2476,7 +2484,6 @@ Section DetailsFiller::makeReportReactionSection(
 	return Section{
 		.widget = std::move(wrap),
 		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::None(),
 	};
 }
 
@@ -2549,7 +2556,6 @@ Section DetailsFiller::makeViewChannel(not_null<ChannelData*> channel) {
 	return Section{
 		.widget = std::move(wrap),
 		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::None(),
 	};
 }
 
@@ -2589,7 +2595,6 @@ Section DetailsFiller::makeTopicsList(not_null<Data::Forum*> forum) {
 	return Section{
 		.widget = std::move(wrap),
 		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::None(),
 	};
 }
 
@@ -2603,17 +2608,17 @@ void DetailsFiller::buildSections() {
 	_stack->add(makeInfo());
 	if (const auto user = _peer->asUser()) {
 		_stack->add(makeAddAsContact(user));
-		_stack->add(makeBotVerifyDivider());
+		addBotVerify();
 		if (const auto info = user->botInfo.get()) {
 			if (info->hasMainApp) {
-				_stack->add(makeMainApp(user));
+				addMainApp(user);
 			}
 			if (info->canManageEmojiStatus) {
 				_stack->add(makeBotPermissions(user));
 			}
 			if (const auto id = user->botManagerId()) {
 				if (const auto mgr = user->owner().userLoaded(id)) {
-					_stack->add(makeManagedBotFooter(mgr));
+					addManagedBotFooter(mgr);
 				}
 			}
 		}
@@ -2624,7 +2629,7 @@ void DetailsFiller::buildSections() {
 			}
 		}
 	} else if (const auto channel = _peer->asChannel()) {
-		_stack->add(makeBotVerifyDivider());
+		addBotVerify();
 		if (!channel->isMegagroup()) {
 			_stack->add(makeViewChannel(channel));
 		}
@@ -3243,7 +3248,7 @@ object_ptr<Ui::RpWidget> SetupChannelMembersAndManage(
 		) -> std::unique_ptr<Ui::Text::CustomEmoji> {
 			return (data == Ui::kCreditsCurrency)
 				? Ui::MakeCreditsIconEmoji(height, 1)
-				: std::make_unique<Ui::Text::ShiftedEmoji>(
+				: MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
 					Ui::Earn::MakeCurrencyIconEmoji(font, color),
 					QPoint(0, st::channelEarnCurrencyCommonMargins.top()));
 		};

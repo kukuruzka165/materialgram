@@ -18,7 +18,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/tooltip.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/userpic_view.h"
+#include "history/history_message_selection.h"
 #include "history/history_inner_widget_accessibility.h"
+#include "history/view/history_view_cursor_state.h"
+#include "history/view/history_view_keyboard_text_selection.h"
 #include "history/view/history_view_top_bar_widget.h"
 
 #include <QtGui/QPainterPath>
@@ -154,6 +157,10 @@ public:
 
 	void setItemsRevealHeight(int revealHeight);
 	void changeItemsRevealHeight(int revealHeight);
+	void setPullBottomInset(int inset);
+	[[nodiscard]] int pullBottomInset() const {
+		return _pullBottomInset;
+	}
 	void checkActivation();
 	void recountHistoryGeometry(bool initial = false);
 	void updateSize();
@@ -198,6 +205,9 @@ public:
 	void elementShowTooltip(
 		const TextWithEntities &text,
 		Fn<void()> hiddenCallback);
+	void elementShowHiddenSenderTooltip(
+		FullMsgId itemId,
+		const TextWithEntities &text);
 	bool elementAnimationsPaused();
 	void elementSendBotCommand(
 		const QString &command,
@@ -240,6 +250,9 @@ public:
 	[[nodiscard]] int itemTop(const HistoryItem *item) const;
 	[[nodiscard]] int itemTop(const Element *view) const;
 	[[nodiscard]] Element *viewByItem(const HistoryItem *item) const;
+	bool scrollToElementLocalY(
+		not_null<const Element*> view,
+		int localTop);
 
 	// Returns (view, offset-from-top).
 	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(
@@ -308,8 +321,7 @@ private:
 
 	using ChosenReaction = HistoryView::Reactions::ChosenReaction;
 	using VideoUserpic = Dialogs::Ui::VideoUserpic;
-	using SelectedItems
-		= base::flat_map<HistoryItem*, TextSelection, std::less<>>;
+	using SelectedItems = base::flat_set<not_null<HistoryItem*>, std::less<>>;
 	enum class MouseAction {
 		None,
 		PrepareDrag,
@@ -327,9 +339,15 @@ private:
 		BottomToTop,
 	};
 	using CursorState = HistoryView::CursorState;
+	using MessageSelection = HistoryView::MessageSelection;
 	using PointState = HistoryView::PointState;
 	using TextState = HistoryView::TextState;
 	using StateRequest = HistoryView::StateRequest;
+	struct RenderSelectionState {
+		TextSelection selection;
+		bool fullMessageSelected = false;
+		const MessageSelection *messageSelection = nullptr;
+	};
 
 	// This function finds all history items that are displayed and calls template method
 	// for each found message (in given direction) in the passed history with passed top offset.
@@ -425,12 +443,26 @@ private:
 	void adjustCurrent(int32 y, History *history) const;
 	Element *prevItem(Element *item);
 	Element *nextItem(Element *item);
+	[[nodiscard]] bool hasSelectedText() const;
+	void clearTextSelection();
+	void setTextSelection(
+		not_null<Element*> view,
+		MessageSelection selection);
+	[[nodiscard]] TextSelection getSelectedTextRange(
+		not_null<HistoryItem*> item) const;
+	[[nodiscard]] MessageSelection getSelectedTextSelection(
+		not_null<HistoryItem*> item) const;
+	[[nodiscard]] bool isPressInSelectedText(
+		not_null<const Element*> view,
+		TextState state) const;
+	[[nodiscard]] auto selectedItemsForExport() const
+		-> std::vector<not_null<HistoryItem*>>;
 	void updateDragSelection(Element *dragSelFrom, Element *dragSelTo, bool dragSelecting);
-	TextSelection itemRenderSelection(
+	RenderSelectionState itemRenderSelection(
 		not_null<Element*> view,
 		int selfromy,
 		int seltoy) const;
-	TextSelection computeRenderSelection(
+	RenderSelectionState computeRenderSelection(
 		not_null<const SelectedItems*> selected,
 		not_null<Element*> view) const;
 
@@ -537,6 +569,7 @@ private:
 	int _historyMarginTop = 0;
 	int _historyMarginBottom = 0;
 	int _revealHeight = 0;
+	int _pullBottomInset = 0;
 	int _forumThreadBarWidth = 0;
 	Ui::PeerUserpicView _forumThreadBarUserpicView;
 
@@ -561,6 +594,10 @@ private:
 
 	style::cursor _cursor = style::cur_default;
 	SelectedItems _selected;
+	HistoryItem *_selectedTextItem = nullptr;
+	MessageSelection _selectedTextSelection;
+	TextForMimeData _selectedText;
+	HistoryView::KeyboardTextSelection _keyboardTextSelection;
 	std::optional<Data::ReportInput> _chooseForReportReason;
 
 	const std::unique_ptr<Ui::PathShiftGradient> _pathGradient;
@@ -588,7 +625,7 @@ private:
 	HistoryItem *_mouseActionItem = nullptr;
 	HistoryItem *_dragStateItem = nullptr;
 	CursorState _mouseCursorState = CursorState();
-	uint16 _mouseTextSymbol = 0;
+	TextState _mouseTextAnchor;
 	bool _mouseActive = false;
 	bool _dragStateUserpic = false;
 	bool _pressWasInactive = false;

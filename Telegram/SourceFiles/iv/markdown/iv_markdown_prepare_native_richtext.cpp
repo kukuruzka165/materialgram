@@ -9,16 +9,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 struct GeoPointLocation;
 
+#include "base/algorithm.h"
 #include "data/data_location.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
+#include "iv/markdown/iv_markdown_prepare_serialize.h"
 #include "ui/basic_click_handlers.h"
 #include "history/history_location_manager.h"
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 
 namespace Iv::Markdown {
 namespace {
+
+constexpr auto kDefaultMapWidth = 400;
+constexpr auto kDefaultMapHeight = 200;
 
 [[nodiscard]] uint64 GeneratePreparedBlockIdValue(
 		NativeIvPrepareState *state) {
@@ -30,100 +36,77 @@ namespace {
 	return { .value = GeneratePreparedBlockIdValue(state) };
 }
 
-[[nodiscard]] PreparedPlaceholderBlockId GeneratePreparedPlaceholderBlockId(
-		NativeIvPrepareState *state) {
-	return { .value = GeneratePreparedBlockIdValue(state) };
+[[nodiscard]] uint64 CanonicalPhotoId(const Iv::RichPage::Block &data) {
+	return data.photoId;
 }
 
-[[nodiscard]] const NativeIvPhotoInfo *FindNativeIvPhoto(
-		uint64 photoId,
-		const NativeIvPrepareState &state) {
-	for (const auto &photo : state.photos) {
-		if (photo.id == photoId) {
-			return &photo;
-		}
-	}
-	return nullptr;
+[[nodiscard]] uint64 CanonicalPhotoId(
+		const Iv::RichPage::GroupedMediaItem &data) {
+	return data.photoId;
 }
 
-[[nodiscard]] const NativeIvDocumentInfo *FindNativeIvDocument(
-		uint64 documentId,
-		const NativeIvPrepareState &state) {
-	for (const auto &document : state.documents) {
-		if (document.id == documentId) {
-			return &document;
-		}
-	}
-	return nullptr;
+[[nodiscard]] uint64 CanonicalDocumentId(const Iv::RichPage::Block &data) {
+	return data.documentId;
 }
 
-void MergeNativeIvDocumentInfo(
-		NativeIvDocumentInfo *existing,
-		NativeIvDocumentInfo info) {
-	if (!existing || (existing->id != info.id)) {
-		return;
-	}
-	if (existing->width <= 0 && info.width > 0) {
-		existing->width = info.width;
-	}
-	if (existing->height <= 0 && info.height > 0) {
-		existing->height = info.height;
-	}
-	if (existing->fileName.isEmpty() && !info.fileName.isEmpty()) {
-		existing->fileName = std::move(info.fileName);
-	}
-	if (existing->title.isEmpty() && !info.title.isEmpty()) {
-		existing->title = std::move(info.title);
-	}
-	if (existing->performer.isEmpty() && !info.performer.isEmpty()) {
-		existing->performer = std::move(info.performer);
-	}
-	if (existing->duration <= 0 && info.duration > 0) {
-		existing->duration = info.duration;
-	}
-	if (!existing->isVideoFile && info.isVideoFile) {
-		existing->isVideoFile = true;
-	}
-	if (!existing->isAnimation && info.isAnimation) {
-		existing->isAnimation = true;
-	}
+[[nodiscard]] uint64 CanonicalDocumentId(
+		const Iv::RichPage::GroupedMediaItem &data) {
+	return data.documentId;
 }
 
-[[nodiscard]] bool IsNativeIvVideoDocument(
-		const NativeIvDocumentInfo &info) {
-	return info.isVideoFile || info.isAnimation;
+[[nodiscard]] int CanonicalWidth(const Iv::RichPage::Block &data) {
+	return data.width;
+}
+
+[[nodiscard]] int CanonicalWidth(
+		const Iv::RichPage::GroupedMediaItem &data) {
+	return data.width;
+}
+
+[[nodiscard]] int CanonicalHeight(const Iv::RichPage::Block &data) {
+	return data.height;
+}
+
+[[nodiscard]] int CanonicalHeight(
+		const Iv::RichPage::GroupedMediaItem &data) {
+	return data.height;
 }
 
 [[nodiscard]] bool PrepareNativeIvGroupedMediaItem(
-		const MTPPageBlock &item,
-		PreparedGroupedMediaItemData *result,
-		const NativeIvPrepareState &state) {
-	return item.match([&](const MTPDpageBlockPhoto &data) {
-		const auto info = FindNativeIvPhoto(uint64(data.vphoto_id().v), state);
-		if (!info || info->width <= 0 || info->height <= 0) {
+		const Iv::RichPage::GroupedMediaItem &item,
+		PreparedGroupedMediaItemData *result) {
+	switch (item.kind) {
+	case Iv::RichPage::BlockKind::Photo: {
+		const auto photoId = CanonicalPhotoId(item);
+		const auto width = CanonicalWidth(item);
+		const auto height = CanonicalHeight(item);
+		if (!photoId || width <= 0 || height <= 0) {
 			return false;
 		}
 		result->media.kind = PreparedMediaItemKind::Photo;
-		result->media.id = info->id;
-		result->media.width = info->width;
-		result->media.height = info->height;
+		result->media.id = photoId;
+		result->media.width = width;
+		result->media.height = height;
+		result->media.spoiler = item.spoiler;
 		return true;
-	}, [&](const MTPDpageBlockVideo &data) {
-		const auto info = FindNativeIvDocument(uint64(data.vvideo_id().v), state);
-		if (!info
-			|| !IsNativeIvVideoDocument(*info)
-			|| info->width <= 0
-			|| info->height <= 0) {
+	}
+	case Iv::RichPage::BlockKind::Video: {
+		const auto documentId = CanonicalDocumentId(item);
+		const auto width = CanonicalWidth(item);
+		const auto height = CanonicalHeight(item);
+		if (!documentId || width <= 0 || height <= 0) {
 			return false;
 		}
 		result->media.kind = PreparedMediaItemKind::Document;
-		result->media.id = info->id;
-		result->media.width = info->width;
-		result->media.height = info->height;
+		result->media.id = documentId;
+		result->media.width = width;
+		result->media.height = height;
+		result->media.spoiler = item.spoiler;
 		return true;
-	}, [](const auto &) {
+	}
+	default:
 		return false;
-	});
+	}
 }
 
 void SortPreparedIvRichText(PreparedIvRichText *text) {
@@ -185,391 +168,209 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	return true;
 }
 
-[[nodiscard]] bool AddNativeIvEntity(
-		TextWithEntities *text,
-		int from,
-		EntityType type) {
-	const auto length = text->text.size() - from;
-	if (length <= 0) {
-		return true;
+void AddNativeIvBlockAnchor(
+		QString *blockAnchorId,
+		std::vector<QString> *blockAnchorIds,
+		QString anchorId) {
+	if (anchorId.isEmpty()) {
+		return;
 	}
-	text->entities.push_back(EntityInText(type, from, length));
-	return true;
+	if (blockAnchorId && blockAnchorId->isEmpty()) {
+		*blockAnchorId = std::move(anchorId);
+		return;
+	}
+	if (blockAnchorId && *blockAnchorId == anchorId) {
+		return;
+	}
+	if (blockAnchorIds
+		&& !ranges::contains(*blockAnchorIds, anchorId)) {
+		blockAnchorIds->push_back(std::move(anchorId));
+	}
 }
 
-[[nodiscard]] bool AppendNativeIvRichText(
-		const MTPRichText &text,
-		TextWithEntities *result,
-		std::vector<PreparedLink> *links,
-		QString *blockAnchorId,
-		NativeIvPrepareState *state) {
-	if (state->blocked()) {
+[[nodiscard]] bool DropNativeIvClickHandlerEntity(EntityType type) {
+	switch (type) {
+	case EntityType::Mention:
+	case EntityType::Hashtag:
+	case EntityType::BotCommand:
+	case EntityType::Cashtag:
+	case EntityType::Url:
+	case EntityType::Email:
+	case EntityType::Phone:
+	case EntityType::BankCard:
+	case EntityType::CustomUrl:
+	case EntityType::MentionName:
+	case EntityType::FormattedDate:
+		return true;
+	default:
 		return false;
 	}
-	return text.match([&](const MTPDtextEmpty &) {
-		return true;
-	}, [&](const MTPDtextPlain &data) {
-		result->append(qs(data.vtext()));
-		return true;
-	}, [&](const MTPDtextConcat &data) {
-		for (const auto &part : data.vtexts().v) {
-			if (!AppendNativeIvRichText(
-					part,
-					result,
-					links,
-					blockAnchorId,
-					state)) {
-				return false;
+}
+
+void RememberCanonicalInlineFormula(
+		const EntityInText &entity,
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	if (entity.type() != EntityType::CustomEmoji) {
+		return;
+	}
+	const auto parsed = ParseInlineTextObjectEntity(entity.data());
+	if (!parsed || parsed->kind != InlineTextObjectKind::Formula) {
+		return;
+	}
+	const auto formula = std::get_if<InlineTextObjectFormulaData>(&parsed->data);
+	if (!formula) {
+		return;
+	}
+	(void)state->rememberFormula(
+		MathKind::Inline,
+		formula->trimmedTex,
+		context.textSize,
+		context.renderWidthCap,
+		context.renderHeightCap);
+}
+
+void AppendCanonicalNativeIvRichText(
+		const Iv::RichPage::RichText &text,
+		PreparedIvRichText *result,
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	const auto shift = result->text.text.size();
+	result->text.text.append(text.text.text);
+	result->text.entities.reserve(
+		result->text.entities.size() + text.text.entities.size());
+	for (const auto &entity : text.text.entities) {
+		if (context.dropClickHandlers
+			&& DropNativeIvClickHandlerEntity(entity.type())) {
+			continue;
+		}
+		if (entity.type() == EntityType::CustomUrl) {
+			if (entity.offset() < 0
+				|| entity.length() <= 0
+				|| entity.offset() >= text.text.text.size()) {
+				continue;
 			}
+			const auto length = std::min(
+				entity.length(),
+				int(text.text.text.size()) - entity.offset());
+			const auto decoded = Iv::DecodeRichPageLinkUrl(entity.data());
+			(void)AddNativeIvPreparedLink(
+				&result->text,
+				&result->links,
+				shift + entity.offset(),
+				length,
+				decoded ? decoded->url : entity.data(),
+				decoded ? decoded->webpageId : 0);
+			continue;
 		}
-		return true;
-	}, [&](const MTPDtextImage &data) {
-		const auto replacementText = u"[image]"_q;
-		if (!data.vdocument_id().v || data.vw().v <= 0 || data.vh().v <= 0) {
-			result->append(replacementText);
-			return true;
-		}
-		const auto entityData = SerializeInlineTextObjectEntity({
-			.kind = InlineTextObjectKind::IvImage,
-			.data = InlineTextObjectIvImageData{
-				.documentId = uint64(data.vdocument_id().v),
-				.width = data.vw().v,
-				.height = data.vh().v,
-				.replacementText = replacementText,
-			},
-		});
-		if (entityData.isEmpty()) {
-			result->append(replacementText);
-			return true;
-		}
-		const auto from = result->text.size();
-		result->append(QChar::ObjectReplacementCharacter);
-		result->entities.push_back(EntityInText(
-			EntityType::CustomEmoji,
-			from,
-			1,
-			entityData));
-		return true;
-	}, [&](const MTPDtextBold &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		return AddNativeIvEntity(result, from, EntityType::Bold);
-	}, [&](const MTPDtextItalic &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		return AddNativeIvEntity(result, from, EntityType::Italic);
-	}, [&](const MTPDtextUnderline &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		return AddNativeIvEntity(result, from, EntityType::Underline);
-	}, [&](const MTPDtextStrike &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		return AddNativeIvEntity(result, from, EntityType::StrikeOut);
-	}, [&](const MTPDtextFixed &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		return AddNativeIvEntity(result, from, EntityType::Code);
-	}, [&](const MTPDtextUrl &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		if (result->text.size() == from) {
-			result->append(qs(data.vurl()));
-		}
-		const auto webpageId = uint64(data.vwebpage_id().v);
-		return AddNativeIvPreparedLink(
-			result,
-			links,
-			from,
-			result->text.size() - from,
-			qs(data.vurl()),
-			webpageId);
-	}, [&](const MTPDtextEmail &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		if (result->text.size() == from) {
-			result->append(qs(data.vemail()));
-		}
-		return AddNativeIvPreparedLink(
-			result,
-			links,
-			from,
-			result->text.size() - from,
-			u"mailto:"_q + qs(data.vemail()));
-	}, [&](const MTPDtextSubscript &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		return AddNativeIvEntity(result, from, EntityType::Subscript);
-	}, [&](const MTPDtextSuperscript &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		return AddNativeIvEntity(result, from, EntityType::Superscript);
-	}, [&](const MTPDtextMarked &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		return AddNativeIvEntity(result, from, EntityType::Marked);
-	}, [&](const MTPDtextPhone &data) {
-		const auto from = result->text.size();
-		if (!AppendNativeIvRichText(
-				data.vtext(),
-				result,
-				links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-		if (result->text.size() == from) {
-			result->append(qs(data.vphone()));
-		}
-		return AddNativeIvPreparedLink(
-			result,
-			links,
-			from,
-			result->text.size() - from,
-			u"tel:"_q + qs(data.vphone()));
-	}, [&](const MTPDtextAnchor &data) {
-		if (blockAnchorId && blockAnchorId->isEmpty()) {
-			*blockAnchorId = NormalizeFragmentId(qs(data.vname()));
-		}
-		return AppendNativeIvRichText(
-			data.vtext(),
-			result,
-			links,
-			blockAnchorId,
-			state);
-	});
+		RememberCanonicalInlineFormula(entity, state, context);
+		result->text.entities.push_back(EntityInText(
+			entity.type(),
+			entity.offset() + shift,
+			entity.length(),
+			entity.data()));
+	}
+}
+
+[[nodiscard]] int ScaleNativeIvFormulaCap(
+		int cap,
+		int textSize,
+		int baseTextSize) {
+	if (cap <= 0) {
+		return 0;
+	}
+	const auto numerator = int64(cap) * std::max(textSize, 1);
+	const auto denominator = std::max(baseTextSize, 1);
+	return std::max(int((numerator + denominator - 1) / denominator), 1);
+}
+
+[[nodiscard]] NativeIvRichTextContext ResolveNativeIvRichTextContext(
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	const auto bodyTextSize = state->dimensions.bodyTextSize;
+	if (!context.textSize) {
+		context.textSize = bodyTextSize;
+	}
+	if (!context.renderWidthCap) {
+		context.renderWidthCap = ScaleNativeIvFormulaCap(
+			state->dimensions.displayMathMaxRenderWidth,
+			context.textSize,
+			state->dimensions.displayMathTextSize);
+	}
+	if (!context.renderHeightCap) {
+		context.renderHeightCap = ScaleNativeIvFormulaCap(
+			state->dimensions.displayMathMaxRenderHeight,
+			context.textSize,
+			state->dimensions.displayMathTextSize);
+	}
+	return context;
 }
 
 [[nodiscard]] bool PrepareNativeIvCaption(
-		const MTPPageCaption &caption,
+		const Iv::RichPage::RichText &caption,
 		PreparedIvRichText *result,
 		QString *blockAnchorId,
 		NativeIvPrepareState *state) {
-	if (!AppendNativeIvRichText(
-			caption.data().vtext(),
-			&result->text,
-			&result->links,
-			blockAnchorId,
-			state)) {
-		return false;
+	return PrepareNativeIvRichText(
+		caption,
+		result,
+		blockAnchorId,
+		state);
+}
+
+[[nodiscard]] bool PrepareNativeIvCanonicalPlaceholderBlock(
+		QString label,
+		const Iv::RichPage::RichText &caption,
+		QString anchorId,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto prepared = PreparedIvRichText();
+	if (!PrepareNativeIvCaption(caption, &prepared, &anchorId, state)) {
+		return state->result.failure.failed()
+			? false
+			: PrepareNativeIvPlainPlaceholderBlock(std::move(label), result);
 	}
-	auto credit = PreparedIvRichText();
-	if (!PrepareNativeIvRichText(
-			caption.data().vcredit(),
-			&credit,
-			blockAnchorId,
-			state)) {
-		return false;
-	}
-	if (!credit.text.text.isEmpty()) {
-		if (!result->text.text.isEmpty()) {
-			result->text.append(QChar('\n'));
-		}
-		if (!AppendNativeIvRichText(
-				caption.data().vcredit(),
-				&result->text,
-				&result->links,
-				blockAnchorId,
-				state)) {
-			return false;
-		}
-	}
+	SortPreparedIvRichText(&prepared);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Placeholder;
+	block.text = std::move(prepared.text);
+	block.links = std::move(prepared.links);
+	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(prepared.anchorIds);
+	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
+	block.placeholder.label = std::move(label);
+	block.placeholder.copyText = block.text.text.isEmpty()
+		? block.placeholder.label
+		: (block.placeholder.label + u"\n"_q + block.text.text);
+	result->push_back(std::move(block));
 	return true;
+}
+
+void ApplyEmptyMediaCaptionPlaceholder(
+		PreparedBlock *block,
+		NativeIvPrepareState *state) {
+	if (!state->editMode || !block->text.text.isEmpty()) {
+		return;
+	}
+	block->editPlaceholderText = u"Caption"_q;
 }
 
 } // namespace
 
-void RememberNativeIvPhoto(
-		NativeIvPrepareState *state,
-		const MTPPhoto &photo) {
-	auto info = NativeIvPhotoInfo{
-		.id = photo.match([](const auto &data) {
-			return data.vid().v;
-		}),
-	};
-	photo.match([](const MTPDphotoEmpty &) {
-	}, [&](const MTPDphoto &data) {
-		auto width = 0;
-		auto height = 0;
-		const auto assign = [&](int w, int h) {
-			if (w > 0 && h > 0) {
-				width = w;
-				height = h;
-			}
-		};
-		for (const auto &size : data.vsizes().v) {
-			size.match([&](const MTPDphotoSizeEmpty &) {
-			}, [&](const MTPDphotoSize &data) {
-				if (data.vtype().v == u"y"_q) {
-					assign(data.vw().v, data.vh().v);
-				} else if (!width && data.vtype().v == u"x"_q) {
-					assign(data.vw().v, data.vh().v);
-				} else if (!width && data.vtype().v == u"w"_q) {
-					assign(data.vw().v, data.vh().v);
-				}
-			}, [&](const MTPDphotoCachedSize &data) {
-				if (data.vtype().v == u"y"_q) {
-					assign(data.vw().v, data.vh().v);
-				} else if (!width && data.vtype().v == u"x"_q) {
-					assign(data.vw().v, data.vh().v);
-				} else if (!width && data.vtype().v == u"w"_q) {
-					assign(data.vw().v, data.vh().v);
-				}
-			}, [&](const MTPDphotoStrippedSize &) {
-			}, [&](const MTPDphotoSizeProgressive &data) {
-				if (data.vtype().v == u"y"_q) {
-					assign(data.vw().v, data.vh().v);
-				} else if (!width && data.vtype().v == u"x"_q) {
-					assign(data.vw().v, data.vh().v);
-				} else if (!width && data.vtype().v == u"w"_q) {
-					assign(data.vw().v, data.vh().v);
-				}
-			}, [&](const MTPDphotoPathSize &) {
-			});
-		}
-		info.width = width;
-		info.height = height;
-	});
-	if (!info.id) {
-		return;
-	}
-	for (auto &existing : state->photos) {
-		if (existing.id == info.id) {
-			existing = info;
-			return;
-		}
-	}
-	state->photos.push_back(info);
-}
-
-void RememberNativeIvDocument(
-		NativeIvPrepareState *state,
-		const MTPDocument &document) {
-	auto info = NativeIvDocumentInfo{
-		.id = document.match([](const auto &data) {
-			return data.vid().v;
-		}),
-	};
-	document.match([](const MTPDdocumentEmpty &) {
-	}, [&](const MTPDdocument &data) {
-		const auto assignDimensions = [&](int width, int height, bool force) {
-			if (width <= 0 || height <= 0) {
-				return;
-			}
-			if (force || info.width <= 0 || info.height <= 0) {
-				info.width = width;
-				info.height = height;
-			}
-		};
-		for (const auto &attribute : data.vattributes().v) {
-			attribute.match([&](const MTPDdocumentAttributeAudio &data) {
-				info.duration = data.vduration().v;
-				info.title = qs(data.vtitle().value_or_empty());
-				info.performer = qs(data.vperformer().value_or_empty());
-			}, [&](const MTPDdocumentAttributeFilename &data) {
-				info.fileName = qs(data.vfile_name());
-			}, [&](const MTPDdocumentAttributeImageSize &data) {
-				assignDimensions(data.vw().v, data.vh().v, false);
-			}, [&](const MTPDdocumentAttributeAnimated &) {
-				info.isAnimation = true;
-			}, [&](const MTPDdocumentAttributeVideo &data) {
-				info.isVideoFile = true;
-				assignDimensions(data.vw().v, data.vh().v, true);
-			}, [&](const auto &) {});
-		}
-	});
-	if (!info.id) {
-		return;
-	}
-	if (const auto existing = FindNativeIvDocument(info.id, *state)) {
-		const auto index = existing - state->documents.data();
-		MergeNativeIvDocumentInfo(&state->documents[index], std::move(info));
-		return;
-	}
-	state->documents.push_back(std::move(info));
-}
-
 bool PrepareNativeIvRichText(
-		const MTPRichText &text,
+		const Iv::RichPage::RichText &text,
 		PreparedIvRichText *result,
 		QString *blockAnchorId,
-		NativeIvPrepareState *state) {
-	return AppendNativeIvRichText(
-		text,
-		&result->text,
-		&result->links,
-		blockAnchorId,
-		state);
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	context = ResolveNativeIvRichTextContext(state, context);
+	AddNativeIvBlockAnchor(blockAnchorId, &result->anchorIds, text.anchorId);
+	for (const auto &anchorId : text.anchorIds) {
+		AddNativeIvBlockAnchor(blockAnchorId, &result->anchorIds, anchorId);
+	}
+	AppendCanonicalNativeIvRichText(text, result, state, context);
+	return true;
 }
 
 bool AppendPreparedIvRichBlock(
@@ -579,7 +380,9 @@ bool AppendPreparedIvRichBlock(
 		PreparedIvRichText prepared,
 		QString anchorId,
 		bool allowEmpty,
-		bool supplementary) {
+		bool supplementary,
+		std::optional<PreparedEditBlockSource> editBlock,
+		std::optional<PreparedEditLeafSource> editLeaf) {
 	SortPreparedIvRichText(&prepared);
 	if (prepared.text.text.isEmpty() && !allowEmpty) {
 		return true;
@@ -590,7 +393,10 @@ bool AppendPreparedIvRichBlock(
 	block.text = std::move(prepared.text);
 	block.links = std::move(prepared.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(prepared.anchorIds);
 	block.supplementary = supplementary;
+	block.editBlock = std::move(editBlock);
+	block.editLeaf = std::move(editLeaf);
 	result->push_back(std::move(block));
 	return true;
 }
@@ -607,16 +413,24 @@ bool PrepareNativeIvPlainPlaceholderBlock(
 }
 
 bool PrepareNativeIvPhotoBlock(
-		const MTPDpageBlockPhoto &data,
+		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	const auto info = FindNativeIvPhoto(uint64(data.vphoto_id().v), *state);
-	if (!info || info->width <= 0 || info->height <= 0) {
-		return true;
+	if (!CanonicalPhotoId(data)
+		|| CanonicalWidth(data) <= 0
+		|| CanonicalHeight(data) <= 0) {
+		return state->editMode
+			? PrepareNativeIvCanonicalPlaceholderBlock(
+				u"Photo"_q,
+				data.caption,
+				data.anchorId,
+				result,
+				state)
+			: true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
-	if (!PrepareNativeIvCaption(data.vcaption(), &caption, &anchorId, state)) {
+	if (!PrepareNativeIvCaption(data.caption, &caption, &anchorId, state)) {
 		return false;
 	}
 	SortPreparedIvRichText(&caption);
@@ -624,32 +438,42 @@ bool PrepareNativeIvPhotoBlock(
 	block.kind = PreparedBlockKind::Photo;
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
-	block.anchorId = std::move(anchorId);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
+	ApplyEmptyMediaCaptionPlaceholder(&block, state);
 	block.photo.id = GeneratePreparedMediaBlockId(state);
-	block.photo.photoId = info->id;
-	block.photo.width = info->width;
-	block.photo.height = info->height;
-	block.photo.urlOverride = data.vurl() ? qs(*data.vurl()) : QString();
+	block.photo.photoId = CanonicalPhotoId(data);
+	block.photo.width = CanonicalWidth(data);
+	block.photo.height = CanonicalHeight(data);
+	block.photo.urlOverride = data.url;
+	block.photo.caption = block.text;
+	block.photo.spoiler = data.spoiler;
 	block.photo.viewerOpen = true;
 	result->push_back(std::move(block));
 	return true;
 }
 
 bool PrepareNativeIvVideoBlock(
-		const MTPDpageBlockVideo &data,
+		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	const auto info = FindNativeIvDocument(uint64(data.vvideo_id().v), *state);
-	if (!info
-		|| !IsNativeIvVideoDocument(*info)
-		|| info->width <= 0
-		|| info->height <= 0) {
-		return true;
+	if (!CanonicalDocumentId(data)
+		|| CanonicalWidth(data) <= 0
+		|| CanonicalHeight(data) <= 0) {
+		return state->editMode
+			? PrepareNativeIvCanonicalPlaceholderBlock(
+				u"Video"_q,
+				data.caption,
+				data.anchorId,
+				result,
+				state)
+			: true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
-	if (!PrepareNativeIvCaption(data.vcaption(), &caption, &anchorId, state)) {
+	if (!PrepareNativeIvCaption(data.caption, &caption, &anchorId, state)) {
 		return false;
 	}
 	SortPreparedIvRichText(&caption);
@@ -657,28 +481,39 @@ bool PrepareNativeIvVideoBlock(
 	block.kind = PreparedBlockKind::Video;
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
-	block.anchorId = std::move(anchorId);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
+	ApplyEmptyMediaCaptionPlaceholder(&block, state);
 	block.video.id = GeneratePreparedMediaBlockId(state);
 	block.video.media.kind = PreparedMediaItemKind::Document;
-	block.video.media.id = info->id;
-	block.video.media.width = info->width;
-	block.video.media.height = info->height;
+	block.video.media.id = CanonicalDocumentId(data);
+	block.video.media.width = CanonicalWidth(data);
+	block.video.media.height = CanonicalHeight(data);
+	block.video.media.spoiler = data.spoiler;
+	block.video.caption = block.text;
 	result->push_back(std::move(block));
 	return true;
 }
 
 bool PrepareNativeIvAudioBlock(
-		const MTPDpageBlockAudio &data,
+		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	const auto info = FindNativeIvDocument(uint64(data.vaudio_id().v), *state);
-	if (!info) {
-		return true;
+	if (!CanonicalDocumentId(data)) {
+		return state->editMode
+			? PrepareNativeIvCanonicalPlaceholderBlock(
+				u"Audio"_q,
+				data.caption,
+				data.anchorId,
+				result,
+				state)
+			: true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
-	if (!PrepareNativeIvCaption(data.vcaption(), &caption, &anchorId, state)) {
+	if (!PrepareNativeIvCaption(data.caption, &caption, &anchorId, state)) {
 		return false;
 	}
 	SortPreparedIvRichText(&caption);
@@ -686,44 +521,40 @@ bool PrepareNativeIvAudioBlock(
 	block.kind = PreparedBlockKind::Audio;
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
-	block.anchorId = std::move(anchorId);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
+	ApplyEmptyMediaCaptionPlaceholder(&block, state);
 	block.audio.id = GeneratePreparedMediaBlockId(state);
-	block.audio.documentId = info->id;
-	block.audio.title = info->title;
-	block.audio.performer = info->performer;
-	block.audio.fileName = info->fileName;
-	block.audio.duration = info->duration;
+	block.audio.documentId = CanonicalDocumentId(data);
+	block.audio.title = data.audioTitle;
+	block.audio.performer = data.audioPerformer;
+	block.audio.fileName = data.audioFileName;
+	block.audio.duration = data.audioDuration;
 	result->push_back(std::move(block));
 	return true;
 }
 
 bool PrepareNativeIvMapBlock(
-		const MTPDpageBlockMap &data,
+		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	auto prepared = PreparedMapBlockData();
-	const auto supported = data.vgeo().match([&](const MTPDgeoPoint &geo) {
-		if (!geo.vaccess_hash().v || data.vw().v <= 0 || data.vh().v <= 0) {
-			return false;
-		}
-		prepared.latitude = geo.vlat().v;
-		prepared.longitude = geo.vlong().v;
-		prepared.accessHash = geo.vaccess_hash().v;
-		prepared.width = data.vw().v;
-		prepared.height = data.vh().v;
-		prepared.zoom = data.vzoom().v;
-		prepared.url = LocationClickHandler::Url(Data::LocationPoint(geo));
-		return true;
-	}, [](const auto &) {
-		return false;
-	});
-	if (!supported) {
-		return true;
+	const auto width = (data.width > 0) ? data.width : kDefaultMapWidth;
+	const auto height = (data.height > 0) ? data.height : kDefaultMapHeight;
+	if (data.zoom <= 0 || (!data.accessHash && !state->editMode)) {
+		return state->editMode
+			? PrepareNativeIvCanonicalPlaceholderBlock(
+				u"Map"_q,
+				data.caption,
+				data.anchorId,
+				result,
+				state)
+			: true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
-	if (!PrepareNativeIvCaption(data.vcaption(), &caption, &anchorId, state)) {
+	if (!PrepareNativeIvCaption(data.caption, &caption, &anchorId, state)) {
 		return false;
 	}
 	SortPreparedIvRichText(&caption);
@@ -731,40 +562,35 @@ bool PrepareNativeIvMapBlock(
 	block.kind = PreparedBlockKind::Map;
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
-	block.anchorId = std::move(anchorId);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
-	prepared.id = GeneratePreparedMediaBlockId(state);
-	block.map = std::move(prepared);
+	block.forceTextSegment = state->editMode;
+	ApplyEmptyMediaCaptionPlaceholder(&block, state);
+	block.map.id = GeneratePreparedMediaBlockId(state);
+	block.map.latitude = data.latitude;
+	block.map.longitude = data.longitude;
+	block.map.accessHash = data.accessHash;
+	block.map.width = width;
+	block.map.height = height;
+	block.map.zoom = data.zoom;
+	block.map.url = LocationClickHandler::Url(Data::LocationPoint(
+		data.latitude,
+		data.longitude,
+		Data::LocationPoint::NoAccessHash));
 	result->push_back(std::move(block));
 	return true;
 }
 
 bool PrepareNativeIvChannelBlock(
-		const MTPDpageBlockChannel &data,
+		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
 	auto prepared = PreparedChannelBlockData();
-	const auto supported = data.vchannel().match([&](const MTPDchannel &channel) {
-		prepared.channelId = channel.vid().v;
-		prepared.title = qs(channel.vtitle());
-		prepared.username = qs(channel.vusername().value_or_empty());
-		return true;
-	}, [&](const MTPDchannelForbidden &channel) {
-		prepared.channelId = channel.vid().v;
-		prepared.title = qs(channel.vtitle());
-		return true;
-	}, [&](const MTPDchat &channel) {
-		prepared.channelId = channel.vid().v;
-		prepared.title = qs(channel.vtitle());
-		return true;
-	}, [&](const MTPDchatForbidden &channel) {
-		prepared.channelId = channel.vid().v;
-		prepared.title = qs(channel.vtitle());
-		return true;
-	}, [](const auto &) {
-		return false;
-	});
-	if (!supported || !prepared.channelId || prepared.title.isEmpty()) {
+	prepared.channelId = data.channelId;
+	prepared.title = data.channelTitle;
+	prepared.username = data.username;
+	if (!prepared.channelId || prepared.title.isEmpty()) {
 		return true;
 	}
 	auto block = PreparedBlock();
@@ -776,22 +602,21 @@ bool PrepareNativeIvChannelBlock(
 }
 
 bool PrepareNativeIvGroupedMediaBlock(
-		const QVector<MTPPageBlock> &items,
-		const MTPPageCaption &caption,
-		PreparedGroupedMediaIntent intent,
-		QString placeholderLabel,
+		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	Q_UNUSED(placeholderLabel);
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::GroupedMedia;
 	block.groupedMedia.id = GeneratePreparedMediaBlockId(state);
-	block.groupedMedia.intent = intent;
-	block.groupedMedia.items.reserve(items.size());
-	for (const auto &item : items) {
+	block.groupedMedia.intent = (data.mediaIntent
+		== Iv::RichPage::GroupedMediaIntent::Slideshow)
+		? PreparedGroupedMediaIntent::Slideshow
+		: PreparedGroupedMediaIntent::Collage;
+	block.groupedMedia.items.reserve(data.mediaItems.size());
+	for (const auto &item : data.mediaItems) {
 		auto prepared = PreparedGroupedMediaItemData();
 		prepared.id = GeneratePreparedMediaBlockId(state);
-		if (!PrepareNativeIvGroupedMediaItem(item, &prepared, *state)) {
+		if (!PrepareNativeIvGroupedMediaItem(item, &prepared)) {
 			continue;
 		}
 		block.groupedMedia.items.push_back(std::move(prepared));
@@ -800,61 +625,21 @@ bool PrepareNativeIvGroupedMediaBlock(
 		return true;
 	}
 	auto preparedCaption = PreparedIvRichText();
+	auto anchorId = QString();
 	if (!PrepareNativeIvCaption(
-			caption,
+			data.caption,
 			&preparedCaption,
-			&block.anchorId,
+			&anchorId,
 			state)) {
 		return false;
 	}
 	SortPreparedIvRichText(&preparedCaption);
 	block.text = std::move(preparedCaption.text);
 	block.links = std::move(preparedCaption.links);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(preparedCaption.anchorIds);
 	block.supplementary = true;
-	result->push_back(std::move(block));
-	return true;
-}
-
-namespace {
-
-[[nodiscard]] QString NativeIvPlaceholderCopyText(
-		const QString &label,
-		const TextWithEntities &caption) {
-	return caption.text.isEmpty()
-		? label
-		: (label + u"\n"_q + caption.text);
-}
-
-} // namespace
-
-bool PrepareNativeIvPlaceholderBlock(
-		QString label,
-		const MTPPageCaption &caption,
-		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state,
-		std::optional<EmbedRequest> embed) {
-	auto prepared = PreparedIvRichText();
-	auto anchorId = QString();
-	if (!PrepareNativeIvCaption(caption, &prepared, &anchorId, state)) {
-		return state->result.failure.failed()
-			? false
-			: PrepareNativeIvPlainPlaceholderBlock(std::move(label), result);
-	}
-	SortPreparedIvRichText(&prepared);
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::Placeholder;
-	block.text = std::move(prepared.text);
-	block.links = std::move(prepared.links);
-	block.anchorId = std::move(anchorId);
-	block.supplementary = true;
-	block.placeholder.label = std::move(label);
-	block.placeholder.embed = std::move(embed);
-	if (block.placeholder.embed && *block.placeholder.embed) {
-		block.placeholder.id = GeneratePreparedPlaceholderBlockId(state);
-	}
-	block.placeholder.copyText = NativeIvPlaceholderCopyText(
-		block.placeholder.label,
-		block.text);
+	block.groupedMedia.caption = block.text;
 	result->push_back(std::move(block));
 	return true;
 }

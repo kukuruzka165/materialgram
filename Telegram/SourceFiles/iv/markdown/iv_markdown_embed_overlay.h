@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "base/flat_map.h"
 #include "base/timer.h"
 #include "iv/markdown/iv_markdown_common.h"
 #include "ui/effects/radial_animation.h"
@@ -38,8 +37,10 @@ class RpWidget;
 } // namespace Ui
 
 namespace Webview {
-struct WindowConfig;
+struct DataRequest;
+enum class DataResult;
 class Window;
+struct WindowConfig;
 } // namespace Webview
 
 namespace Iv::Markdown {
@@ -56,11 +57,8 @@ public:
 
 	EmbedOverlay(
 		QWidget *parent,
-		const base::flat_map<QByteArray, QByteArray> *resources,
 		std::function<void(QString)> linkActivationCallback,
-		Webview::StorageId storageId,
-		std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
-			dataRequestHandler);
+		Webview::StorageId storageId);
 	~EmbedOverlay();
 
 	[[nodiscard]] bool preloadEmbed(
@@ -122,16 +120,13 @@ private:
 	[[nodiscard]] QRect bodyRectInContent() const;
 	[[nodiscard]] QMargins contentPadding() const;
 	[[nodiscard]] int cssPixelsToQt(int value) const;
-	[[nodiscard]] QByteArray normalizedRequestId(const std::string &id) const;
+	[[nodiscard]] QByteArray htmlRequestId();
 	[[nodiscard]] Webview::DataResult handleDataRequest(
 		Webview::DataRequest request);
 
 	const QPointer<QWidget> _webviewParent;
-	const base::flat_map<QByteArray, QByteArray> *const _resources = nullptr;
 	const std::function<void(QString)> _linkActivationCallback;
 	const Webview::StorageId _storageId;
-	const std::function<Webview::DataResult(QByteArray, Webview::DataRequest)>
-		_dataRequestHandler;
 	Ui::RpWidget *_content = nullptr;
 	Ui::IconButton *_close = nullptr;
 	Ui::PaddingWrap<Ui::FlatLabel> *_error = nullptr;
@@ -143,18 +138,17 @@ private:
 	QRect _contentGeometry;
 	QSize _preferredBodySize;
 	QSize _pendingPreferredBodySize;
-	QString _readyNavigationToken;
+	QByteArray _htmlRequestId;
 	QPointer<QWidget> _focusRestore;
 	std::function<void()> _shownCallback;
 	std::function<void()> _failedCallback;
 	int _contentWidth = 0;
-	int _navigationGeneration = 0;
+	int _dataResourceGeneration = 0;
 	int _webviewGeneration = 0;
 	double _cssToQtScale = 1.;
 	Mode _mode = Mode::Hidden;
 	bool _pressedOutside = false;
 	bool _externalWindowCloseReported = false;
-	bool _readyFromResource = false;
 	bool _ready = false;
 	bool _loading = false;
 	bool _showErrorOnFailure = false;

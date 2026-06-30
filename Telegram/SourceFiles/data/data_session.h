@@ -432,6 +432,7 @@ public:
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRemoved() const;
 	[[nodiscard]] rpl::producer<not_null<const HistoryItem*>> itemRemoved(
 		FullMsgId itemId) const;
+	[[nodiscard]] rpl::producer<> sessionDataAboutToBeCleared() const;
 	void notifyItemsAboutToBeDestroyed(
 		const std::vector<not_null<HistoryItem*>> &items);
 	[[nodiscard]] auto itemsAboutToBeDestroyed() const
@@ -757,7 +758,9 @@ public:
 	[[nodiscard]] not_null<WebPageData*> webpage(
 		WebPageId id,
 		const QString &siteName,
-		const TextWithEntities &content);
+		const TextWithEntities &content,
+		PhotoData *photo = nullptr,
+		DocumentData *document = nullptr);
 	[[nodiscard]] not_null<WebPageData*> webpage(
 		WebPageId id,
 		WebPageType type,
@@ -928,6 +931,7 @@ public:
 	};
 	void refreshChatListEntry(Dialogs::Key key);
 	void removeChatListEntry(Dialogs::Key key);
+	void refreshChatListUnreadOnTop();
 	[[nodiscard]] auto chatListEntryRefreshes() const
 		-> rpl::producer<ChatListEntryRefresh>;
 
@@ -956,6 +960,14 @@ public:
 	};
 	void webViewResultSent(WebViewResultSent &&sent);
 	[[nodiscard]] rpl::producer<WebViewResultSent> webViewResultSent() const;
+
+	struct JoinChatWebViewDecision {
+		PeerId peerId;
+		uint64 queryId = 0;
+		MTPJoinChatBotResult result;
+	};
+	void joinChatWebViewDecision(JoinChatWebViewDecision &&decision);
+	[[nodiscard]] rpl::producer<JoinChatWebViewDecision> joinChatWebViewDecision() const;
 
 	void saveViewAsMessages(not_null<Forum*> forum, bool viewAsMessages);
 
@@ -1188,6 +1200,7 @@ private:
 	rpl::event_stream<not_null<HistoryItem*>> _itemDataChanges;
 	rpl::event_stream<ReactionsRemoved> _reactionsRemoved;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemRemoved;
+	rpl::event_stream<> _sessionDataAboutToBeCleared;
 	rpl::event_stream<std::vector<not_null<HistoryItem*>>> _itemsAboutToBeDestroyed;
 	rpl::event_stream<ViewRemoval> _viewAboutToBeRemoved;
 	rpl::event_stream<not_null<const ViewElement*>> _viewRemoved;
@@ -1357,6 +1370,7 @@ private:
 	base::flat_map<not_null<PeerData*>, MTP::DcId> _peerStatsDcIds;
 
 	rpl::event_stream<WebViewResultSent> _webViewResultSent;
+	rpl::event_stream<JoinChatWebViewDecision> _joinChatWebViewDecision;
 
 	rpl::event_stream<not_null<PeerData*>> _peerDecorationsUpdated;
 	base::flat_map<

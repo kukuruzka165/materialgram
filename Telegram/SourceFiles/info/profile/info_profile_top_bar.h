@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/object_ptr.h"
 #include "info/info_controller.h" // Key
 #include "info/profile/info_profile_badge.h"
+#include "ui/controls/swipe_handler_data.h"
 #include "ui/rp_widget.h"
 #include "ui/userpic_view.h"
 
@@ -156,6 +157,7 @@ private:
 	void setupButtons(
 		not_null<Window::SessionController*> controller,
 		Source source);
+	void setupSwipeBack(not_null<Window::SessionController*> controller);
 	void setupShowLastSeen(not_null<Window::SessionController*> controller);
 	void setupUniqueBadgeTooltip();
 	void hideBadgeTooltip();
@@ -262,6 +264,7 @@ private:
 	rpl::variable<bool> _backToggles;
 
 	rpl::event_stream<> _backClicks;
+	Ui::Controls::SwipeBackResult _swipeBackData;
 
 	base::unique_qptr<Ui::IconButton> _topBarButton;
 	base::unique_qptr<Ui::PopupMenu> _peerMenu;
@@ -269,6 +272,7 @@ private:
 	Ui::RpWidget *_actionMore = nullptr;
 
 	base::unique_qptr<Ui::HorizontalFitContainer> _actions;
+	base::unique_qptr<Ui::RpWidget> _actionsShadow;
 
 	std::unique_ptr<Lottie::MultiPlayer> _lottiePlayer;
 	bool _lottieSingleLoop = false;

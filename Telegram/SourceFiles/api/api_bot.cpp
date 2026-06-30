@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 
 #include <QtCore/QDataStream>
 #include <QtGui/QGuiApplication>
@@ -525,7 +526,11 @@ void ActivateBotCommand(ClickHandlerContext context, int row, int column) {
 		const auto text = QString::fromUtf8(button->data);
 		if (!text.isEmpty()) {
 			QGuiApplication::clipboard()->setText(text);
-			controller->showToast(tr::lng_text_copied(tr::now));
+			controller->showToast({
+				.text = { tr::lng_text_copied(tr::now) },
+				.iconLottie = u"toast/copy"_q,
+				.iconLottieSize = st::toastLottieIconSize,
+			});
 		}
 	} break;
 

@@ -250,6 +250,12 @@ bool LayerWidget::closeByOutsideClick() const {
 	return _contentWrap ? _contentWrap->closeByOutsideClick() : true;
 }
 
+bool LayerWidget::closeByBackButton() {
+	return _contentWrap
+		? _contentWrap->closeByBackButton()
+		: Ui::LayerWidget::closeByBackButton();
+}
+
 int LayerWidget::MinimalSupportedWidth() {
 	const auto minimalMargins = 2 * st::infoMinimalLayerMargin;
 	return st::infoMinimalWidth + minimalMargins;

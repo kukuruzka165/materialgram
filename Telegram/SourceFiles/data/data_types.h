@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_msg_id.h"
 #include "base/qt/qt_compare.h"
 
+struct AudioAlbumThumbLocation;
 class HistoryItem;
 using HistoryItemsList = std::vector<not_null<HistoryItem*>>;
 

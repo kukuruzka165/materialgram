@@ -51,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_histories.h"
 #include "data/data_history_messages.h"
 #include "api/api_text_entities.h"
+#include "api/api_updates.h"
 #include "data/data_poll.h"
 #include "data/data_todo_list.h"
 #include "lang/lang_keys.h"
@@ -584,6 +585,18 @@ not_null<HistoryItem*> History::addNewMessage(
 		MessageFlags localFlags,
 		NewMessageType type) {
 	const auto newMessage = (type == NewMessageType::Unread);
+	if (newMessage && isUnknownMessageDeleted(id)) {
+		const auto &updates = session().updates();
+		LOG(("Unknown deleted message re-added. "
+			"Peer ID: %1, Message ID: %2, Source: %3.")
+			.arg(peer->id.value & PeerId::kChatTypeMask)
+			.arg(id.bare)
+			.arg(updates.handlingChannelDifference()
+				? u"channelDifference"_q
+				: updates.requestingDifference()
+				? u"commonDifference"_q
+				: u"globalUpdate"_q));
+	}
 	const auto detachExisting = newMessage;
 	const auto item = createItem(
 		id,

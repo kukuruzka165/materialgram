@@ -98,13 +98,15 @@ Location::Location(
 	not_null<Data::CloudImage*> data,
 	Data::LocationPoint point,
 	Element *replacing,
-	TimeId livePeriod)
+	TimeId livePeriod,
+	QSize sizeOverride)
 : Media(parent)
 , _data(data)
 , _live(CreateLiveTracker(parent, livePeriod))
 , _title(st::msgMinWidth)
 , _description(st::msgMinWidth)
 , _link(std::make_shared<LocationClickHandler>(point))
+, _sizeOverride(sizeOverride)
 , _liveLocation(livePeriod > 0) {
 	if (_live) {
 		_title.setText(
@@ -802,11 +804,15 @@ QPoint Location::resolveCustomInfoRightBottom() const {
 }
 
 int Location::fullWidth() const {
-	return st::locationSize.width();
+	return (_sizeOverride.width() > 0)
+		? _sizeOverride.width()
+		: st::locationSize.width();
 }
 
 int Location::fullHeight() const {
-	return st::locationSize.height();
+	return (_sizeOverride.height() > 0)
+		? _sizeOverride.height()
+		: st::locationSize.height();
 }
 
 } // namespace HistoryView

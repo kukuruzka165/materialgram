@@ -74,6 +74,10 @@ private:
 	void createWindow();
 	void createLayerManager();
 	void createPreview();
+	[[nodiscard]] bool updateExistingPreview(
+		MarkdownArticleContent content,
+		OpenOptions options,
+		int scrollTop);
 	void setContent(
 		MarkdownArticleContent content,
 		QString title,
@@ -89,6 +93,9 @@ private:
 	[[nodiscard]] bool historyEnabled(const OpenOptions &options) const;
 	[[nodiscard]] bool sameHistoryPage(
 		const HistoryEntry &entry,
+		uint64 pageId,
+		const QString &sourceUrl) const;
+	[[nodiscard]] bool sameCurrentPage(
 		uint64 pageId,
 		const QString &sourceUrl) const;
 	[[nodiscard]] bool sameHistoryLocation(

@@ -189,6 +189,18 @@ void EditFileCaptionBox(
 		TextWithTags currentCaption,
 		Fn<bool(TextWithTags)> apply) {
 	box->setTitle(tr::lng_context_upload_edit_caption());
+	const auto window = Core::App().findWindow(box);
+	const auto controller = window ? window->sessionController() : nullptr;
+	const auto maxCaptionLength = [&] {
+		if (captionToPeer) {
+			return Data::PremiumLimits(
+				&captionToPeer->session()).captionLengthCurrent();
+		} else if (controller) {
+			return Data::PremiumLimits(
+				&controller->session()).captionLengthCurrent();
+		}
+		return kMaxMessageLength;
+	}();
 	const auto wrap = box->addRow(
 		object_ptr<Ui::RpWidget>(box),
 		st::boxRowPadding);
@@ -197,11 +209,10 @@ void EditFileCaptionBox(
 		st.files.caption,
 		Ui::InputField::Mode::MultiLine,
 		tr::lng_photo_caption());
-	field->setMaxLength(kMaxMessageLength);
+	field->setMaxLength(maxCaptionLength);
 	field->setSubmitSettings(Core::App().settings().sendSubmitWay());
 	Ui::ResizeFitChild(wrap, field);
-	if (const auto window = Core::App().findWindow(box)) {
-		const auto controller = window->sessionController();
+	if (window) {
 		const auto allow = [=](not_null<DocumentData*> emoji) {
 			return captionToPeer
 				&& Data::AllowEmojiWithoutPremium(captionToPeer, emoji);
@@ -1889,7 +1900,8 @@ void SendFilesBox::setupCaption() {
 	}
 	_caption->setSubmitSettings(
 		Core::App().settings().sendSubmitWay());
-	_caption->setMaxLength(kMaxMessageLength);
+	_caption->setMaxLength(
+		Data::PremiumLimits(&_show->session()).captionLengthCurrent());
 
 	_caption->heightChanges(
 	) | rpl::on_next([=] {

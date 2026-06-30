@@ -39,6 +39,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
+#include "poll/poll_link_thumbnail.h"
+#include "poll/poll_media_upload.h"
 #include "history/view/media/history_view_location.h"
 #include "history/view/media/history_view_media_common.h"
 #include "history/view/history_view_group_call_bar.h"
@@ -51,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_poll.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
+#include "data/data_web_page.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "base/crc32hash.h"
 #include "base/unixtime.h"
@@ -61,6 +64,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_polls.h"
 #include "window/window_session_controller.h"
+#include "ui/layers/generic_box.h"
+#include "ui/wrap/padding_wrap.h"
+#include "ui/wrap/vertical_layout.h"
+#include "ui/widgets/labels.h"
+#include "history/view/controls/history_view_webpage_processor.h"
+#include "history/view/media/history_view_web_page.h"
+#include "history/admin_log/history_admin_log_item.h"
+#include "history/history.h"
+#include "ui/chat/chat_style.h"
+#include "ui/chat/chat_theme.h"
+#include "ui/effects/path_shift_gradient.h"
+#include "window/themes/window_theme.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
@@ -103,6 +118,7 @@ enum class PollThumbnailKind {
 	Audio,
 	Emoji,
 	Geo,
+	Webpage,
 };
 
 struct PercentCounterItem {
@@ -192,6 +208,267 @@ void CountNicePercent(
 	return uint32(base::crc32(hash.constData(), hash.size()));
 }
 
+[[nodiscard]] bool WebPageHasRichPreview(WebPageData *webpage) {
+	return webpage
+		&& (!webpage->title.isEmpty()
+			|| !webpage->description.text.isEmpty()
+			|| webpage->photo
+			|| !webpage->siteName.isEmpty());
+}
+
+class OpenLinkPreviewDelegate final
+	: public HistoryView::SimpleElementDelegate {
+public:
+	using HistoryView::SimpleElementDelegate::SimpleElementDelegate;
+
+	HistoryView::Context elementContext() override {
+		return HistoryView::Context::History;
+	}
+};
+
+class OpenLinkPreviewWidget final : public Ui::RpWidget {
+public:
+	OpenLinkPreviewWidget(
+		not_null<QWidget*> parent,
+		not_null<Window::SessionController*> controller,
+		not_null<WebPageData*> webpage,
+		Fn<void()> close);
+	~OpenLinkPreviewWidget();
+
+private:
+	void paintEvent(QPaintEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void leaveEventHook(QEvent *e) override;
+	void resizeMedia(int width);
+	void updateActiveLink(QPoint point);
+
+	const base::weak_ptr<Window::SessionController> _controller;
+	const Fn<void()> _close;
+	const std::unique_ptr<Ui::ChatTheme> _theme;
+	const std::unique_ptr<Ui::ChatStyle> _style;
+	const std::unique_ptr<OpenLinkPreviewDelegate> _delegate;
+	const not_null<History*> _history;
+	AdminLog::OwnedItem _item;
+
+};
+
+OpenLinkPreviewWidget::OpenLinkPreviewWidget(
+	not_null<QWidget*> parent,
+	not_null<Window::SessionController*> controller,
+	not_null<WebPageData*> webpage,
+	Fn<void()> close)
+: RpWidget(parent)
+, _controller(base::make_weak(controller))
+, _close(std::move(close))
+, _theme(Window::Theme::DefaultChatThemeOn(lifetime()))
+, _style(std::make_unique<Ui::ChatStyle>(
+	controller->session().colorIndicesValue()))
+, _delegate(std::make_unique<OpenLinkPreviewDelegate>(
+	controller,
+	[=] { update(); }))
+, _history(controller->session().data().history(
+	controller->session().userPeerId())) {
+	_style->apply(_theme.get());
+	setMouseTracking(true);
+
+	const auto item = _history->makeMessage({
+		.id = _history->nextNonHistoryEntryId(),
+		.flags = (MessageFlag::FakeHistoryItem | MessageFlag::Local),
+		.from = _history->peer->id,
+	}, TextWithEntities(), MTP_messageMediaEmpty());
+	auto owned = AdminLog::OwnedItem(_delegate.get(), item);
+	owned->overrideMedia(std::make_unique<HistoryView::WebPage>(
+		owned.get(),
+		webpage,
+		MediaWebPageFlags{}));
+	_item = std::move(owned);
+	if (const auto media = _item->media()) {
+		media->setInBubbleState(MediaInBubbleState::Middle);
+		media->initDimensions();
+	}
+
+	_history->session().downloaderTaskFinished(
+	) | rpl::on_next([=] {
+		update();
+	}, lifetime());
+
+	_history->owner().viewRepaintRequest(
+	) | rpl::on_next([=](Data::RequestViewRepaint data) {
+		if (data.view == _item.get()) {
+			update();
+		}
+	}, lifetime());
+
+	widthValue(
+	) | rpl::filter([=](int w) {
+		return w > 0;
+	}) | rpl::on_next([=](int w) {
+		resizeMedia(w);
+	}, lifetime());
+}
+
+OpenLinkPreviewWidget::~OpenLinkPreviewWidget() {
+	const auto raw = _item.get();
+	if (Element::Pressed() == raw) {
+		Element::Pressed(nullptr);
+	}
+	if (Element::Hovered() == raw) {
+		Element::Hovered(nullptr);
+	}
+	if (Element::PressedLink() == raw) {
+		Element::PressedLink(nullptr);
+	}
+	if (Element::HoveredLink() == raw) {
+		Element::HoveredLink(nullptr);
+	}
+	if (Element::Moused() == raw) {
+		Element::Moused(nullptr);
+	}
+}
+
+void OpenLinkPreviewWidget::resizeMedia(int width) {
+	if (const auto media = _item->media()) {
+		const auto height = media->resizeGetHeight(width);
+		resize(width, height);
+	}
+}
+
+void OpenLinkPreviewWidget::paintEvent(QPaintEvent *e) {
+	const auto media = _item->media();
+	if (!media) {
+		return;
+	}
+	auto p = Painter(this);
+	auto context = _theme->preparePaintContext(
+		_style.get(),
+		rect(),
+		rect(),
+		e->rect(),
+		!window()->isActiveWindow());
+	media->draw(p, context);
+}
+
+void OpenLinkPreviewWidget::updateActiveLink(QPoint point) {
+	const auto media = _item->media();
+	if (!media) {
+		return;
+	}
+	const auto state = media->textState(point, StateRequest());
+	ClickHandler::setActive(state.link, _item.get());
+	setCursor(state.link ? style::cur_pointer : style::cur_default);
+}
+
+void OpenLinkPreviewWidget::mouseMoveEvent(QMouseEvent *e) {
+	updateActiveLink(e->pos());
+}
+
+void OpenLinkPreviewWidget::mousePressEvent(QMouseEvent *e) {
+	if (e->button() != Qt::LeftButton) {
+		return;
+	}
+	updateActiveLink(e->pos());
+	Element::Pressed(_item.get());
+	ClickHandler::pressed();
+}
+
+void OpenLinkPreviewWidget::mouseReleaseEvent(QMouseEvent *e) {
+	if (e->button() != Qt::LeftButton) {
+		return;
+	}
+	const auto activated = ClickHandler::unpressed();
+	if (Element::Pressed() == _item.get()) {
+		Element::Pressed(nullptr);
+	}
+	if (!activated) {
+		return;
+	}
+	const auto externalUrl = activated->url();
+	if (!externalUrl.isEmpty()) {
+		UrlClickHandler::Open(externalUrl);
+	} else if (const auto controller = _controller.get()) {
+		activated->onClick({
+			e->button(),
+			QVariant::fromValue(ClickHandlerContext{
+				.itemId = _item->data()->fullId(),
+				.sessionWindow = _controller,
+				.show = controller->uiShow(),
+			})
+		});
+	}
+	if (_close) {
+		_close();
+	}
+}
+
+void OpenLinkPreviewWidget::leaveEventHook(QEvent *e) {
+	ClickHandler::clearActive(_item.get());
+	setCursor(style::cur_default);
+	RpWidget::leaveEventHook(e);
+}
+
+void OpenPollOptionLinkBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller,
+		QString url,
+		WebPageData *webpage) {
+	box->setTitle(tr::lng_polls_option_open_link_title());
+	const auto content = box->verticalLayout();
+
+	const auto openAndClose = [=] {
+		UrlClickHandler::Open(url);
+		box->closeBox();
+	};
+
+	const auto urlContainer = content->add(
+		object_ptr<Ui::RpWidget>(content),
+		st::pollOpenLinkUrlOuterPadding);
+	const auto urlLabel = Ui::CreateChild<Ui::FlatLabel>(
+		urlContainer,
+		rpl::single(url),
+		st::pollOpenLinkUrlLabel);
+	urlLabel->setBreakEverywhere(true);
+	urlLabel->setSelectable(true);
+	const auto inner = st::pollOpenLinkUrlInnerPadding;
+	urlContainer->widthValue(
+	) | rpl::on_next([=](int width) {
+		urlLabel->resizeToWidth(
+			std::max(width - inner.left() - inner.right(), 1));
+		urlLabel->moveToLeft(inner.left(), inner.top());
+	}, urlContainer->lifetime());
+	urlLabel->heightValue(
+	) | rpl::on_next([=](int height) {
+		urlContainer->resize(
+			urlContainer->width(),
+			height + inner.top() + inner.bottom());
+	}, urlContainer->lifetime());
+	urlContainer->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = QPainter(urlContainer);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::windowBgOver);
+		p.drawRoundedRect(
+			urlContainer->rect(),
+			st::pollOpenLinkUrlRadius,
+			st::pollOpenLinkUrlRadius);
+	}, urlContainer->lifetime());
+
+	if (webpage && !webpage->failed && WebPageHasRichPreview(webpage)) {
+		content->add(
+			object_ptr<OpenLinkPreviewWidget>(
+				content,
+				controller,
+				webpage,
+				[=] { box->closeBox(); }),
+			st::pollOpenLinkPreviewOuterPadding);
+	}
+
+	box->addButton(tr::lng_open_link(), openAndClose);
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+}
+
 struct PollThumbnailData {
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
 	ClickHandlerPtr handler;
@@ -256,6 +533,20 @@ struct PollThumbnailData {
 			Data::FileOrigin());
 		result.rounded = true;
 		result.kind = PollThumbnailKind::Geo;
+	} else if (media.webpage || !media.url.isEmpty()) {
+		const auto webpage = media.webpage;
+		const auto photo = webpage ? webpage->photo : nullptr;
+		if (photo) {
+			result.id = uint64(photo->id);
+			result.thumbnail = Ui::MakePhotoThumbnailCenterCrop(
+				photo,
+				messageContext.id);
+			result.rounded = true;
+		} else {
+			result.thumbnail = ::Poll::MakeLinkThumbnail();
+			result.rounded = true;
+		}
+		result.kind = PollThumbnailKind::Webpage;
 	}
 	if (result.kind == PollThumbnailKind::Photo && result.id) {
 		const auto photo = media.photo;
@@ -294,6 +585,30 @@ struct PollThumbnailData {
 				}
 				HistoryView::ShowPollGeoPreview(controller, point);
 			});
+	} else if (result.kind == PollThumbnailKind::Webpage) {
+		const auto url = !media.url.isEmpty()
+			? media.url
+			: (media.webpage ? media.webpage->url : QString());
+		const auto webpage = media.webpage;
+		const auto session = &poll->session();
+		if (!url.isEmpty()) {
+			result.handler = std::make_shared<LambdaClickHandler>(
+				[=](ClickContext clickContext) {
+					const auto my = clickContext.other.value<
+						ClickHandlerContext>();
+					const auto controller = my.sessionWindow.get();
+					if (!controller
+						|| (&controller->session() != session)) {
+						UrlClickHandler::Open(url);
+						return;
+					}
+					controller->show(Box(
+						OpenPollOptionLinkBox,
+						controller,
+						url,
+						webpage));
+				});
+		}
 	}
 	return result;
 }
@@ -1120,6 +1435,7 @@ struct Poll::Header : public Poll::Part {
 	std::unique_ptr<Media> _attachedMediaAttach;
 	mutable QImage _attachedMediaCache;
 	mutable Ui::BubbleRounding _attachedMediaCacheRounding;
+	mutable bool _attachedMediaCacheBlurred = false;
 	std::vector<RecentVoter> _recentVoters;
 	QImage _recentVotersImage;
 	mutable ClickHandlerPtr _showSolutionLink;
@@ -1288,7 +1604,7 @@ TextState Poll::Header::textState(
 				result = _attachedMediaAttach->textState(
 					point - QPoint(sideSkip, tshift),
 					request);
-				result.symbol = 0;
+				SetTextStatePosition(&result, 0, false);
 				return result;
 			}
 		} else if (_attachedMedia
@@ -1361,7 +1677,7 @@ TextState Poll::Header::textState(
 						textWidth,
 						outerWidth,
 						request.forText()));
-				result.symbol += symbolAdd;
+				AddTextStateOffset(&result, symbolAdd);
 				return result;
 			}
 			if (_solutionAttach) {
@@ -1397,7 +1713,7 @@ TextState Poll::Header::textState(
 						result = _solutionAttach->textState(
 							point - QPoint(mediaLeft, mediaTop),
 							request);
-						result.symbol = 0;
+						SetTextStatePosition(&result, 0, false);
 					}
 				}
 			}
@@ -1417,7 +1733,7 @@ TextState Poll::Header::textState(
 				point - QPoint(left, tshift),
 				innerWidth,
 				request.forText()));
-		result.symbol += symbolAdd;
+		AddTextStateOffset(&result, symbolAdd);
 		return result;
 	}
 	if (point.y() >= tshift + questionH) {
@@ -2195,6 +2511,7 @@ void Poll::updateTexts() {
 	_headerPart->updateAttachedMedia();
 	_headerPart->updateSolutionText();
 	_headerPart->updateSolutionMedia();
+	refreshWebpageSubscriptions();
 	updateVotes();
 
 	if (willStartAnimation) {
@@ -2460,11 +2777,8 @@ void Poll::Header::validateTopMediaCache(QSize size) const {
 	}
 	const auto ratio = style::DevicePixelRatio();
 	const auto rounding = topMediaRounding();
-	if ((_attachedMediaCache.size() == (size * ratio))
-		&& (_attachedMediaCacheRounding == rounding)) {
-		return;
-	}
 	auto source = QImage();
+	auto blurred = false;
 	if (_attachedMedia->photoMedia) {
 		if (const auto image
 			= _attachedMedia->photoMedia->image(Data::PhotoSize::Large)) {
@@ -2473,9 +2787,11 @@ void Poll::Header::validateTopMediaCache(QSize size) const {
 			= _attachedMedia->photoMedia->image(
 				Data::PhotoSize::Thumbnail)) {
 			source = image->original();
+			blurred = true;
 		} else if (const auto image
 			= _attachedMedia->photoMedia->thumbnailInline()) {
 			source = image->original();
+			blurred = true;
 		}
 	}
 	if (source.isNull()) {
@@ -2483,6 +2799,11 @@ void Poll::Header::validateTopMediaCache(QSize size) const {
 			std::max(size.width(), size.height()) * ratio);
 	}
 	if (source.isNull()) {
+		return;
+	}
+	if ((_attachedMediaCache.size() == (size * ratio))
+		&& (_attachedMediaCacheRounding == rounding)
+		&& (_attachedMediaCacheBlurred == blurred)) {
 		return;
 	}
 	const auto sw = source.width();
@@ -2498,16 +2819,20 @@ void Poll::Header::validateTopMediaCache(QSize size) const {
 			cropW,
 			cropH);
 	}
+	const auto options = blurred
+		? Images::Option::Blur
+		: Images::Option();
 	auto prepared = Images::Prepare(
 		source,
 		size * ratio,
-		{ .outer = size });
+		{ .options = options, .outer = size });
 	prepared = Images::Round(
 		std::move(prepared),
 		MediaRoundingMask(rounding));
 	prepared.setDevicePixelRatio(ratio);
 	_attachedMediaCache = std::move(prepared);
 	_attachedMediaCacheRounding = rounding;
+	_attachedMediaCacheBlurred = blurred;
 }
 
 int Poll::Header::countDescriptionHeight(int innerWidth) const {
@@ -3508,33 +3833,83 @@ int Poll::Options::paintAnswer(
 			media,
 			media);
 		if (!target.isEmpty()) {
-			const auto image = answer.thumbnail->image(media);
-			if (!image.isNull()) {
-				const auto source = QRectF(QPointF(), QSizeF(image.size()));
-				const auto kx = target.width() / source.width();
-				const auto ky = target.height() / source.height();
-				const auto scale = std::max(kx, ky);
-				const auto size = QSizeF(
-					source.width() * scale,
-					source.height() * scale);
-				const auto geometry = QRectF(
-					target.x() + (target.width() - size.width()) / 2.,
-					target.y() + (target.height() - size.height()) / 2.,
-					size.width(),
-					size.height());
+			const auto webpagePlaceholder
+				= (answer.thumbnailKind == PollThumbnailKind::Webpage)
+					&& !answer.thumbnailId;
+			const auto selected = context.selected();
+			const auto &linkIcon = context.outbg
+				? (selected
+					? st::historyPollLinkOutIconSelected
+					: st::historyPollLinkOutIcon)
+				: (selected
+					? st::historyPollLinkInIconSelected
+					: st::historyPollLinkInIcon);
+			if (webpagePlaceholder) {
+				const auto cache = stm->replyCache[0].get();
 				p.save();
-				if (answer.thumbnailRounded) {
-					auto path = QPainterPath();
-					path.addRoundedRect(
-						target,
-						st::roundRadiusSmall,
-						st::roundRadiusSmall);
+				auto hq = PainterHighQualityEnabler(p);
+				auto path = QPainterPath();
+				path.addRoundedRect(
+					target,
+					st::historyPollAnswerThumbRadius,
+					st::historyPollAnswerThumbRadius);
+				p.fillPath(path, cache->bg);
+				if (selected) {
 					p.setClipPath(path);
+					p.fillRect(target, context.st->msgSelectOverlay());
 				}
-				p.drawImage(geometry, image, source);
 				p.restore();
-				if (answer.thumbnailIsVideo) {
-					st::dialogsMiniPlay.paintInCenter(p, target);
+				const auto iconX = target.x()
+					+ (target.width() - linkIcon.width()) / 2;
+				const auto iconY = target.y()
+					+ (target.height() - linkIcon.height()) / 2;
+				linkIcon.paint(p, iconX, iconY, outerWidth, cache->icon);
+			} else {
+				const auto image = answer.thumbnail->image(media);
+				if (!image.isNull()) {
+					const auto source = QRectF(
+						QPointF(),
+						QSizeF(image.size()));
+					const auto kx = target.width() / source.width();
+					const auto ky = target.height() / source.height();
+					const auto scale = std::max(kx, ky);
+					const auto size = QSizeF(
+						source.width() * scale,
+						source.height() * scale);
+					const auto geometry = QRectF(
+						target.x() + (target.width() - size.width()) / 2.,
+						target.y() + (target.height() - size.height()) / 2.,
+						size.width(),
+						size.height());
+					p.save();
+					auto hq = PainterHighQualityEnabler(p);
+					if (answer.thumbnailRounded) {
+						auto path = QPainterPath();
+						path.addRoundedRect(
+							target,
+							st::historyPollAnswerThumbRadius,
+							st::historyPollAnswerThumbRadius);
+						p.setClipPath(path);
+					}
+					p.drawImage(geometry, image, source);
+					p.restore();
+					if (answer.thumbnailIsVideo) {
+						st::dialogsMiniPlay.paintInCenter(p, target);
+					}
+					if (answer.thumbnailKind
+						== PollThumbnailKind::Webpage) {
+						p.save();
+						auto hq = PainterHighQualityEnabler(p);
+						auto path = QPainterPath();
+						path.addRoundedRect(
+							target,
+							st::historyPollAnswerThumbRadius,
+							st::historyPollAnswerThumbRadius);
+						p.setClipPath(path);
+						p.fillRect(target, st::songCoverOverlayFg);
+						linkIcon.paintInCenter(p, target);
+						p.restore();
+					}
 				}
 			}
 		}
@@ -3953,12 +4328,12 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 				request);
 			if (partResult.link) {
 				partResult.itemId = result.itemId;
-				partResult.symbol += symbolAdd;
+				AddTextStateOffset(&partResult, symbolAdd);
 				return partResult;
 			}
 			if (point.y() >= tshift && point.y() < tshift + h) {
 				partResult.itemId = result.itemId;
-				partResult.symbol += symbolAdd;
+				AddTextStateOffset(&partResult, symbolAdd);
 				return partResult;
 			}
 		}
@@ -4183,11 +4558,36 @@ bool Poll::Footer::centeredOverlapsInfo(
 }
 
 Poll::~Poll() {
+	for (const auto webpage : _registeredWebpages) {
+		history()->owner().unregisterWebPageView(webpage, _parent);
+	}
 	history()->owner().unregisterPollView(_poll, _parent);
 	if (hasHeavyPart()) {
 		unloadHeavyPart();
 		_parent->checkHeavyPart();
 	}
+}
+
+void Poll::refreshWebpageSubscriptions() {
+	auto wanted = std::vector<WebPageData*>();
+	for (const auto &answer : _poll->answers) {
+		if (const auto webpage = answer.media.webpage) {
+			if (!ranges::contains(wanted, webpage)) {
+				wanted.push_back(webpage);
+			}
+		}
+	}
+	for (const auto webpage : _registeredWebpages) {
+		if (!ranges::contains(wanted, webpage)) {
+			history()->owner().unregisterWebPageView(webpage, _parent);
+		}
+	}
+	for (const auto webpage : wanted) {
+		if (!ranges::contains(_registeredWebpages, webpage)) {
+			history()->owner().registerWebPageView(webpage, _parent);
+		}
+	}
+	_registeredWebpages = std::move(wanted);
 }
 
 } // namespace HistoryView

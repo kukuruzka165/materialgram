@@ -52,6 +52,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/inline_bot_confirm_prepared.h"
 #include "inline_bots/inline_bot_downloads.h"
 #include "inline_bots/inline_bot_storage.h"
+#ifdef TDESKTOP_IV_EDITOR
+#include "iv/editor/iv_editor_session.h"
+#endif // TDESKTOP_IV_EDITOR
 #include "iv/iv_instance.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
@@ -206,6 +209,33 @@ constexpr auto kPopularAppBotsLimit = 100;
 			: PeerType(0);
 	}
 	return result;
+}
+
+[[nodiscard]] QString JoinChatDecisionToast(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		const MTPJoinChatBotResult &result) {
+	const auto isChannel = [&] {
+		if (const auto peer = session->data().peerLoaded(peerId)) {
+			return peer->isBroadcast();
+		}
+		return false;
+	}();
+	return result.match([&](const MTPDjoinChatBotResultApproved &) {
+		return isChannel
+			? tr::lng_action_you_joined_by_request_channel(tr::now)
+			: tr::lng_action_you_joined_by_request(tr::now);
+	}, [&](const MTPDjoinChatBotResultDeclined &) {
+		return isChannel
+			? tr::lng_group_request_declined_channel(tr::now)
+			: tr::lng_group_request_declined(tr::now);
+	}, [&](const MTPDjoinChatBotResultQueued &) {
+		return isChannel
+			? tr::lng_group_request_sent_channel(tr::now)
+			: tr::lng_group_request_sent(tr::now);
+	}, [&](const MTPDjoinChatBotResultWebView &) {
+		return QString();
+	});
 }
 
 [[nodiscard]] Ui::LocationPickerConfig ResolveMapsConfig(
@@ -793,6 +823,17 @@ void BotAction::handleKeyPress(not_null<QKeyEvent*> e) {
 
 } // namespace
 
+WebViewResultData ParseWebViewResult(const MTPWebViewResult &result) {
+	const auto &data = result.data();
+	return {
+		.url = qs(data.vurl()),
+		.queryId = data.vquery_id().value_or_empty(),
+		.fullscreen = data.is_fullscreen(),
+		.fullsize = data.is_fullsize(),
+		.sameOrigin = data.is_same_origin(),
+	};
+}
+
 base::weak_ptr<WebViewInstance> WebViewInstance::PendingActivation;
 
 MenuBotIcon::MenuBotIcon(
@@ -927,7 +968,7 @@ void WebViewInstance::requestFullBot() {
 	) | rpl::on_next([=] {
 		if (_botFullWaitingArgs.has_value()) {
 			auto args = *base::take(_botFullWaitingArgs);
-			if (args.url.isEmpty()) {
+			if (args.result.url.isEmpty()) {
 				showGame();
 			} else {
 				show(std::move(args));
@@ -985,6 +1026,12 @@ void WebViewInstance::resolve() {
 		}
 	}, [&](WebViewSourceAgeVerification) {
 		requestMain();
+	}, [&](WebViewSourceJoinChat data) {
+		confirmOpen([=] {
+			show({
+				.result = data.result,
+			});
+		}, true);
 	});
 }
 
@@ -1180,11 +1227,8 @@ void WebViewInstance::requestButton() {
 			? action.options.sendAs->input()
 			: MTP_inputPeerEmpty())
 	)).done([=](const MTPWebViewResult &result) {
-		const auto &data = result.data();
 		show({
-			.url = qs(data.vurl()),
-			.queryId = data.vquery_id().value_or_empty(),
-			.fullscreen = data.is_fullscreen(),
+			.result = ParseWebViewResult(result),
 		});
 	}).fail([=](const MTP::Error &error) {
 		_parentShow->showToast(error.type());
@@ -1214,10 +1258,8 @@ void WebViewInstance::requestSimple() {
 		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
 		MTP_string("android")
 	)).done([=](const MTPWebViewResult &result) {
-		const auto &data = result.data();
 		show({
-			.url = qs(data.vurl()),
-			.fullscreen = data.is_fullscreen(),
+			.result = ParseWebViewResult(result),
 		});
 	}).fail([=](const MTP::Error &error) {
 		_parentShow->showToast(error.type());
@@ -1244,10 +1286,8 @@ void WebViewInstance::requestMain() {
 		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
 		MTP_string("tdesktop")
 	)).done([=](const MTPWebViewResult &result) {
-		const auto &data = result.data();
 		show({
-			.url = qs(data.vurl()),
-			.fullscreen = data.is_fullscreen(),
+			.result = ParseWebViewResult(result),
 		});
 	}).fail([=](const MTP::Error &error) {
 		_parentShow->showToast(error.type());
@@ -1275,11 +1315,9 @@ void WebViewInstance::requestApp(bool allowWrite) {
 		MTP_string("android")
 	)).done([=](const MTPWebViewResult &result) {
 		_requestId = 0;
-		const auto &data = result.data();
 		show({
-			.url = qs(data.vurl()),
+			.result = ParseWebViewResult(result),
 			.title = title,
-			.fullscreen = data.is_fullscreen(),
 		});
 	}).fail([=](const MTP::Error &error) {
 		_requestId = 0;
@@ -1386,7 +1424,7 @@ void WebViewInstance::show(ShowArgs &&args) {
 		not_null{ _bot },
 		&AttachWebViewBot::user);
 	const auto hasOpenBot = v::is<WebViewSourceMainMenu>(_source)
-		|| (_context.action->history->peer != _bot);
+		|| (_context.action && _context.action->history->peer != _bot);
 	const auto hasRemoveFromMenu = (attached != end(bots))
 		&& (!attached->inactive || attached->inMainMenu)
 		&& (v::is<WebViewSourceMainMenu>(_source)
@@ -1403,20 +1441,21 @@ void WebViewInstance::show(ShowArgs &&args) {
 		|| (attached != end(bots)
 			&& (attached->inAttachMenu || attached->inMainMenu));
 	const auto downloads = &_session->attachWebView().downloads();
-	_panelUrl = args.url;
+	_panelUrl = args.result.url;
 	_panel = Ui::BotWebView::Show({
-		.url = args.url,
+		.url = args.result.url,
 		.storageId = _session->local().resolveStorageIdBots(),
 		.title = std::move(title),
 		.titleBadge = std::move(titleBadge),
 		.bottom = rpl::single('@' + _bot->username()),
 		.delegate = static_cast<Ui::BotWebView::Delegate*>(this),
 		.menuButtons = buttons,
-		.fullscreen = args.fullscreen,
+		.fullscreen = args.result.fullscreen,
+		.sameOrigin = args.result.sameOrigin,
 		.allowClipboardRead = allowClipboardRead,
 		.downloadsProgress = downloads->progress(_bot),
 	});
-	started(args.queryId);
+	started(args.result.queryId);
 
 	if (const auto strong = PendingActivation.get()) {
 		if (strong == this) {
@@ -1450,6 +1489,18 @@ void WebViewInstance::close() {
 }
 
 void WebViewInstance::started(uint64 queryId) {
+	if (v::is<WebViewSourceJoinChat>(_source)) {
+		if (!queryId) {
+			return;
+		}
+		_session->attachWebView().watchJoinChatWebView(
+			queryId,
+			_parentShow,
+			_context.controller,
+			this);
+		return;
+	}
+
 	Expects(_context.action.has_value());
 
 	if (!queryId) {
@@ -2197,7 +2248,7 @@ void WebViewInstance::botResolveButtonEmoji(
 	_session->data().customEmojiManager().resolve(
 		request.customEmojiId
 	) | rpl::on_next_error([=](not_null<DocumentData*> document) {
-		state->emoji = std::make_unique<Ui::Text::FirstFrameEmoji>(
+		state->emoji = MakeWrappedEmoji<Ui::Text::FirstFrameEmoji>(
 			_session->data().customEmojiManager().create(
 				document,
 				[weakAttempt] {
@@ -2333,6 +2384,42 @@ AttachWebView::AttachWebView(not_null<Main::Session*> session)
 , _storage(std::make_unique<Storage>(session))
 , _refreshTimer([=] { requestBots(); }) {
 	_refreshTimer.callEach(kRefreshBotsTimeout);
+	_session->data().joinChatWebViewDecision(
+	) | rpl::on_next([=](
+			const Data::Session::JoinChatWebViewDecision &decision) {
+		const auto i = _joinChatWebViews.find(decision.queryId);
+		if (i == end(_joinChatWebViews)) {
+			return;
+		}
+		auto data = std::move(i->second);
+		_joinChatWebViews.erase(i);
+
+		const auto text = JoinChatDecisionToast(
+			_session,
+			decision.peerId,
+			decision.result);
+		const auto approved = (decision.result.type()
+			== mtpc_joinChatBotResultApproved);
+		const auto instance = data.instance.get();
+		if (instance) {
+			close(instance);
+			if (approved) {
+				if (const auto peer = _session->data().peerLoaded(
+						decision.peerId)) {
+					if (const auto window = WindowForThread(
+							data.controller,
+							peer->owner().history(peer))) {
+						window->showPeerHistory(
+							peer,
+							Window::SectionShow::Way::Forward);
+					}
+				}
+			}
+		}
+		if (data.show && !text.isEmpty()) {
+			data.show->showToast(text);
+		}
+	}, _lifetime);
 }
 
 AttachWebView::~AttachWebView() {
@@ -2383,6 +2470,18 @@ void AttachWebView::openByUsername(
 			.source = InlineBots::WebViewSourceLinkAttachMenu{},
 		});
 	}));
+}
+
+void AttachWebView::watchJoinChatWebView(
+		uint64 queryId,
+		std::shared_ptr<Ui::Show> show,
+		base::weak_ptr<Window::SessionController> controller,
+		base::weak_ptr<WebViewInstance> instance) {
+	_joinChatWebViews[queryId] = {
+		.show = std::move(show),
+		.controller = controller,
+		.instance = instance,
+	};
 }
 
 void AttachWebView::close(not_null<WebViewInstance*> instance) {
@@ -2801,6 +2900,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer,
 		Fn<Api::SendAction()> actionFactory,
+		Fn<SendMenu::Details()> sendMenuDetails,
 		Fn<void(bool)> attach) {
 	auto result = std::make_unique<Ui::DropdownMenu>(
 		parent,
@@ -2832,10 +2932,6 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 			const auto source = action.options.scheduled
 				? Api::SendType::Scheduled
 				: Api::SendType::Normal;
-			const auto sendMenuType = (action.replyTo.topicRootId
-				|| action.history->peer->starsPerMessageChecked())
-				? SendMenu::Type::SilentOnly
-				: SendMenu::Type::Scheduled;
 			const auto chosen = kDefaultPollCreateFlags;
 			Window::PeerMenuCreatePoll(
 				controller,
@@ -2845,7 +2941,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				chosen,
 				PollData::Flags(),
 				source,
-				{ sendMenuType });
+				sendMenuDetails());
 		}, &st::menuIconCreatePoll);
 	}
 	if (peer->canCreateTodoLists(false)) {
@@ -2855,19 +2951,26 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 			const auto source = action.options.scheduled
 				? Api::SendType::Scheduled
 				: Api::SendType::Normal;
-			const auto sendMenuType = (action.replyTo.topicRootId
-				|| action.history->peer->starsPerMessageChecked())
-				? SendMenu::Type::SilentOnly
-				: SendMenu::Type::Scheduled;
 			Window::PeerMenuCreateTodoList(
 				controller,
 				peer,
 				action.replyTo,
 				action.options.suggest,
 				source,
-				{ sendMenuType });
+				sendMenuDetails());
 		}, &st::menuIconCreateTodoList);
 	}
+#ifdef TDESKTOP_IV_EDITOR
+	if (Data::CanSendAnyOf(peer, ChatRestriction::SendOther, false)) {
+		raw->addAction(tr::lng_article_menu_item(tr::now), [=] {
+			Iv::Editor::ShowComposeBox(
+				controller,
+				peer,
+				actionFactory(),
+				sendMenuDetails);
+		}, &st::menuIconArticle);
+	}
+#endif // TDESKTOP_IV_EDITOR
 	const auto session = &controller->session();
 	const auto locationType = ChatRestriction::SendOther;
 	const auto config = ResolveMapsConfig(session);

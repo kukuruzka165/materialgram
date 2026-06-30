@@ -111,6 +111,7 @@ struct Labeled {
 		{ C::ScheduleMessage, tr::lng_shortcuts_schedule() },
 		separator,
 		{ C::ComposeAiApplyInPlace, tr::lng_shortcuts_ai_compose_apply() },
+		{ C::ToggleWebPagePreview, tr::lng_shortcuts_toggle_link_preview() },
 		separator,
 		{ C::RecordVoice, tr::lng_shortcuts_record_voice_message() },
 		{ C::RecordRound, tr::lng_shortcuts_record_round_message() },

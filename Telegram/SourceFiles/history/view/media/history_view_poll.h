@@ -107,8 +107,10 @@ private:
 	bool inlineFooter() const;
 
 	[[nodiscard]] bool canAddOption() const;
+	void refreshWebpageSubscriptions();
 
 	not_null<PollData*> _poll;
+	std::vector<WebPageData*> _registeredWebpages;
 	int _pollVersion = 0;
 	int _totalVotes = 0;
 	bool _voted = false;

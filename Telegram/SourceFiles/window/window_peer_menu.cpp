@@ -75,7 +75,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/history_item_components.h"
+#include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/history_view_context_menu.h"
+#include "history/view/history_view_schedule_box.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
@@ -117,6 +119,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/premium_preview_box.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_credits.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -339,6 +342,7 @@ private:
 	void addSetPersonalChannel();
 
 	[[nodiscard]] bool skipCreateActions() const;
+	[[nodiscard]] SendMenu::Details createSendMenuDetails() const;
 
 	not_null<SessionController*> _controller;
 	Dialogs::EntryState _request;
@@ -1152,9 +1156,16 @@ void Filler::addTopicLink() {
 		if (const auto strong = weak.get()) {
 			const auto link = Info::Profile::TopicLink(strong, true);
 			QGuiApplication::clipboard()->setText(link);
-			controller->showToast(channel->hasUsername()
-				? tr::lng_channel_public_link_copied(tr::now)
-				: tr::lng_context_about_private_link(tr::now));
+			if (channel->hasUsername()) {
+				controller->showToast({
+					.text = { tr::lng_channel_public_link_copied(tr::now) },
+					.iconLottie = u"toast/voip_invite"_q,
+					.iconLottieSize = st::toastLottieIconSize,
+				});
+			} else {
+				controller->showToast(
+					tr::lng_context_about_private_link(tr::now));
+			}
 		}
 	}, &st::menuIconCopy);
 }
@@ -1279,6 +1290,23 @@ bool Filler::skipCreateActions() const {
 	return isBlocked || isJoinChannel || isBotStart;
 }
 
+SendMenu::Details Filler::createSendMenuDetails() const {
+	using Type = SendMenu::Type;
+
+	const auto type = (_request.section == Section::Scheduled)
+		? Type::Disabled
+		: (!_peer || _peer->starsPerMessageChecked())
+		? Type::SilentOnly
+		: (_request.section == Section::Replies)
+		? (_topic ? Type::Scheduled : Type::SilentOnly)
+		: _peer->isSelf()
+		? Type::Reminder
+		: HistoryView::CanScheduleUntilOnline(_peer)
+		? Type::ScheduledToUser
+		: Type::Scheduled;
+	return { .type = type };
+}
+
 void Filler::addCreatePoll() {
 	if (skipCreateActions()) {
 		return;
@@ -1294,13 +1322,8 @@ void Filler::addCreatePoll() {
 	const auto source = (_request.section == Section::Scheduled)
 		? Api::SendType::Scheduled
 		: Api::SendType::Normal;
-	const auto sendMenuType = (_request.section == Section::Scheduled)
-		? SendMenu::Type::Disabled
-		: (_request.section == Section::Replies
-			|| _peer->starsPerMessageChecked())
-		? SendMenu::Type::SilentOnly
-		: SendMenu::Type::Scheduled;
 	const auto replyTo = _request.currentReplyTo;
+	const auto sendMenuDetails = createSendMenuDetails();
 	const auto suggest = _request.currentSuggest;
 	const auto chosen = kDefaultPollCreateFlags;
 	auto callback = [=] {
@@ -1312,7 +1335,7 @@ void Filler::addCreatePoll() {
 			chosen,
 			PollData::Flags(),
 			source,
-			{ sendMenuType });
+			sendMenuDetails);
 	};
 	_addAction(
 		tr::lng_polls_create(tr::now),
@@ -1336,13 +1359,8 @@ void Filler::addCreateTodoList() {
 	const auto source = (_request.section == Section::Scheduled)
 		? Api::SendType::Scheduled
 		: Api::SendType::Normal;
-	const auto sendMenuType = (_request.section == Section::Scheduled)
-		? SendMenu::Type::Disabled
-		: (_request.section == Section::Replies
-			|| _peer->starsPerMessageChecked())
-		? SendMenu::Type::SilentOnly
-		: SendMenu::Type::Scheduled;
 	const auto replyTo = _request.currentReplyTo;
+	const auto sendMenuDetails = createSendMenuDetails();
 	const auto suggest = _request.currentSuggest;
 	auto callback = [=] {
 		PeerMenuCreateTodoList(
@@ -1351,7 +1369,7 @@ void Filler::addCreateTodoList() {
 			replyTo,
 			suggest,
 			source,
-			{ sendMenuType });
+			sendMenuDetails);
 	};
 	_addAction(
 		tr::lng_todo_create(tr::now),
@@ -2891,6 +2909,16 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 	const auto msgIds = owner->itemsToIds(itemsList);
 	const auto sendersCount = ItemsForwardSendersCount(itemsList);
 	const auto captionsCount = ItemsForwardCaptionsCount(itemsList);
+	const auto hasRichPage = HistoryView::Controls::HasRichPage(itemsList);
+	const auto hasOnlyForcedForwardedInfo = !captionsCount
+		&& HistoryView::Controls::HasOnlyForcedForwardedInfo(itemsList);
+	const auto showForwardOptions = !hasOnlyForcedForwardedInfo
+		&& (!hasRichPage
+			|| HistoryView::Controls::CanHideForwardAuthor(session, itemsList));
+	draft.options = HistoryView::Controls::NormalizeForwardOptions(
+		session,
+		itemsList,
+		draft.options);
 	if (msgIds.empty()) {
 		return nullptr;
 	}
@@ -3112,6 +3140,9 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		boxRaw->setForwardOptions({
 			.sendersCount = sendersCount,
 			.captionsCount = captionsCount,
+			.dropNames = (draft.options != Data::ForwardOptions::PreserveInfo),
+			.dropCaptions = (draft.options
+				== Data::ForwardOptions::NoNamesAndCaptions),
 		});
 		show->showBox(std::move(box));
 		auto state = State{ boxRaw, controllerRaw };
@@ -3239,6 +3270,10 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			state->submit = nullptr;
 			return true;
 		};
+		auto forwardOptions = HistoryView::Controls::NormalizeForwardOptions(
+			session,
+			itemsList,
+			state->box->forwardOptionsData());
 		send(
 			ranges::views::all(
 				peers
@@ -3249,7 +3284,7 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			checkPaid,
 			std::move(comment),
 			options,
-			state->box->forwardOptionsData());
+			forwardOptions);
 		if (!state->submit && successCallback) {
 			successCallback();
 		}
@@ -3274,7 +3309,6 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			: SendMenu::Type::Scheduled;
 	};
 
-	const auto showForwardOptions = true;
 	const auto showMenu = [=](not_null<Ui::RpWidget*> parent) {
 		if (state->menu) {
 			state->menu = nullptr;
@@ -3877,6 +3911,10 @@ void ToggleHistoryArchived(
 			.text = { (archived
 				? tr::lng_archived_added(tr::now)
 				: tr::lng_archived_removed(tr::now)) },
+			.iconLottie = (archived
+				? u"toast/chats_archived"_q
+				: QString()),
+			.iconLottieSize = st::toastLottieIconSize,
 			.st = &st::windowArchiveToast,
 			.duration = (archived
 				? kArchivedToastDuration

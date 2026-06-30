@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+class QWheelEvent;
+
 namespace Ui {
 class ElasticScroll;
 class RpWidget;
@@ -39,6 +41,7 @@ struct SwipeHandlerArgs {
 	Fn<void(SwipeContextData)> update;
 	Fn<SwipeHandlerFinishData(SwipeHandlerInitData)> init;
 	rpl::producer<bool> dontStart = nullptr;
+	Fn<bool(not_null<QWheelEvent*>)> skipWheelEvent;
 	rpl::lifetime *onLifetime = nullptr;
 };
 
@@ -48,7 +51,8 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args);
 	not_null<Ui::RpWidget*> widget,
 	Fn<std::pair<QColor, QColor>()> colors,
 	bool mirrored = false,
-	bool iconMirrored = false);
+	bool iconMirrored = false,
+	Fn<int()> centerY = nullptr);
 
 [[nodiscard]] SwipeHandlerFinishData DefaultSwipeBackHandlerFinishData(
 	Fn<void(void)> callback);

@@ -26,6 +26,7 @@ public:
 	[[nodiscard]] rpl::producer<QString> title() override;
 	void fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) override;
 	void setInnerFocus() override;
+	void showFinished() override;
 	[[nodiscard]] base::weak_qptr<Ui::RpWidget> createPinnedToTop(
 		not_null<QWidget*> parent) override;
 
@@ -36,6 +37,7 @@ private:
 	rpl::variable<QString> _query;
 	std::unique_ptr<Ui::SearchFieldController> _searchController;
 	QPointer<Ui::InputField> _searchField;
+	std::vector<std::pair<QString, QPointer<QWidget>>> _highlights;
 
 };
 

@@ -12,209 +12,37 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/vertical_list.h"
+#include "ui/rect_part.h"
 
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 
 namespace Info::Profile {
+namespace {
 
-SectionSeparator SectionSeparator::None() {
-	return SectionSeparator{ .kind = Kind::None };
-}
-
-SectionSeparator SectionSeparator::Plain() {
-	return SectionSeparator{ .kind = Kind::Plain };
-}
-
-SectionSeparator SectionSeparator::Text(
-		rpl::producer<TextWithEntities> text,
-		Fn<void(not_null<Ui::FlatLabel*>)> setup) {
-	return SectionSeparator{
-		.kind = Kind::Text,
-		.text = std::move(text),
-		.textSetup = std::move(setup),
-	};
-}
-
-SectionStack::SectionStack(not_null<Ui::VerticalLayout*> layout)
-: _layout(layout) {
-}
-
-void SectionStack::add(Section section) {
-	Expects(!_finalized);
-
-	_sections.push_back(std::move(section));
-}
-
-void SectionStack::addPlainSeparator() {
-	Expects(!_finalized);
-
-	if (_sections.empty()) {
-		return;
-	}
-	const auto position = int(_sections.size() - 1);
-	if (!_plainMarkerAfter.empty()
-		&& _plainMarkerAfter.back() == position) {
-		return;
-	}
-	_plainMarkerAfter.push_back(position);
-}
-
-int SectionStack::count() const {
-	return int(_sections.size());
-}
-
-not_null<Ui::VerticalLayout*> SectionStack::layout() const {
-	return _layout;
-}
-
-rpl::producer<bool> SectionStack::anyShownAtOrBefore(int index) const {
-	if (index < 0) {
-		return rpl::single(false);
-	}
-	auto producers = std::vector<rpl::producer<bool>>();
-	producers.reserve(index + 1);
-	for (auto k = 0; k <= index; ++k) {
-		producers.push_back(_sections[k].shown
-			? rpl::duplicate(_sections[k].shown)
-			: rpl::single(true));
-	}
-	return rpl::combine(
-		std::move(producers),
-		[](const std::vector<bool> &v) {
-			return ranges::find(v, true) != v.end();
-		}) | rpl::distinct_until_changed();
-}
-
-rpl::producer<bool> SectionStack::anyShownAfter(int index) const {
-	if (index + 1 >= int(_sections.size())) {
-		return rpl::single(false);
-	}
-	auto producers = std::vector<rpl::producer<bool>>();
-	producers.reserve(_sections.size() - index - 1);
-	for (auto k = index + 1; k != int(_sections.size()); ++k) {
-		producers.push_back(_sections[k].shown
-			? rpl::duplicate(_sections[k].shown)
-			: rpl::single(true));
-	}
-	return rpl::combine(
-		std::move(producers),
-		[](const std::vector<bool> &v) {
-			return ranges::find(v, true) != v.end();
-		}) | rpl::distinct_until_changed();
-}
-
-rpl::producer<bool> SectionStack::anyShownInRange(
-		int from,
-		int toInclusive) const {
-	const auto sectionCount = int(_sections.size());
-	if (from > toInclusive || from >= sectionCount || toInclusive < 0) {
-		return rpl::single(false);
-	}
-	const auto begin = std::max(from, 0);
-	const auto end = std::min(toInclusive, sectionCount - 1);
-	auto producers = std::vector<rpl::producer<bool>>();
-	producers.reserve(end - begin + 1);
-	for (auto k = begin; k <= end; ++k) {
-		producers.push_back(_sections[k].shown
-			? rpl::duplicate(_sections[k].shown)
-			: rpl::single(true));
-	}
-	return rpl::combine(
-		std::move(producers),
-		[](const std::vector<bool> &v) {
-			return ranges::find(v, true) != v.end();
-		}) | rpl::distinct_until_changed();
-}
-
-rpl::producer<bool> SectionStack::nextVisibleIsNonEmbedding(
-		int afterIndex) const {
-	if (afterIndex + 1 >= int(_sections.size())) {
-		return rpl::single(false);
-	}
-	auto producers = std::vector<rpl::producer<bool>>();
-	auto embeds = std::vector<bool>();
-	producers.reserve(_sections.size() - afterIndex - 1);
-	embeds.reserve(_sections.size() - afterIndex - 1);
-	for (auto j = afterIndex + 1; j != int(_sections.size()); ++j) {
-		producers.push_back(_sections[j].shown
-			? rpl::duplicate(_sections[j].shown)
-			: rpl::single(true));
-		embeds.push_back(_sections[j].embedsLeadingSeparator);
-	}
-	return rpl::combine(
-		std::move(producers),
-		[embeds = std::move(embeds)](const std::vector<bool> &values) {
-			for (auto k = 0; k != int(values.size()); ++k) {
-				if (values[k]) {
-					return !embeds[k];
-				}
-			}
-			return false;
-		}) | rpl::distinct_until_changed();
-}
-
-rpl::producer<bool> SectionStack::computePlainMarkerCandidate(
-		int position) const {
-	auto upper = anyShownAtOrBefore(position);
-	auto lower = nextVisibleIsNonEmbedding(position);
-	return rpl::combine(
-		std::move(upper),
-		std::move(lower)
-	) | rpl::map([](bool u, bool l) {
-		return u && l;
-	}) | rpl::distinct_until_changed();
-}
-
-void SectionStack::addPlainMarkerSlot(
-		int markerIndex,
-		not_null<std::vector<rpl::variable<bool>>*> candidates,
-		rpl::producer<bool> textVisible) {
-	auto inner = object_ptr<Ui::VerticalLayout>(_layout);
+[[nodiscard]] not_null<Ui::SlideWrap<>*> CreatePlainSeparator(
+		not_null<Ui::VerticalLayout*> layout) {
+	auto inner = object_ptr<Ui::VerticalLayout>(layout);
 	Ui::AddSkip(inner.data(), st::infoProfileSkip);
 	inner->add(object_ptr<Ui::BoxContentDivider>(
 		inner.data(),
 		st::boxDividerHeight,
 		st::defaultDividerBar));
 	Ui::AddSkip(inner.data(), st::infoProfileSkip);
-	const auto wrap = _layout->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			_layout,
-			std::move(inner)));
-
-	auto candidateShown = rpl::producer<bool>();
-	if (markerIndex == 0) {
-		candidateShown = (*candidates)[0].value();
-	} else {
-		const auto position = _plainMarkerAfter[markerIndex];
-		const auto prevPosition = _plainMarkerAfter[markerIndex - 1];
-		auto sameGap = anyShownInRange(prevPosition + 1, position);
-		candidateShown = rpl::combine(
-			(*candidates)[markerIndex].value(),
-			(*candidates)[markerIndex - 1].value(),
-			std::move(sameGap)
-		) | rpl::map([](bool here, bool prev, bool anyBetween) {
-			const auto sameGapAsPrev = !anyBetween;
-			return here && !(sameGapAsPrev && prev);
-		}) | rpl::distinct_until_changed();
-	}
-	auto shown = rpl::combine(
-		std::move(candidateShown),
-		std::move(textVisible)
-	) | rpl::map([](bool candidate, bool text) {
-		return candidate && !text;
-	}) | rpl::distinct_until_changed();
-	wrap->setDuration(st::infoSlideDuration)->toggleOn(std::move(shown));
+	return layout->add(object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+		layout,
+		std::move(inner)));
 }
 
-void SectionStack::addTextSeparatorSlot(
-		int sectionIndex,
-		SectionSeparator &trailing) {
-	auto inner = object_ptr<Ui::VerticalLayout>(_layout);
+[[nodiscard]] not_null<Ui::SlideWrap<>*> CreateTextSeparator(
+		not_null<Ui::VerticalLayout*> layout,
+		rpl::producer<TextWithEntities> text,
+		Fn<void(not_null<Ui::FlatLabel*>)> setup) {
+	auto inner = object_ptr<Ui::VerticalLayout>(layout);
 	Ui::AddSkip(inner.data(), st::infoProfileSkip);
 	auto label = object_ptr<Ui::FlatLabel>(
 		inner.data(),
-		std::move(trailing.text),
+		std::move(text),
 		st::defaultDividerLabel.label);
 	const auto rawLabel = label.data();
 	inner->add(object_ptr<Ui::DividerLabel>(
@@ -224,75 +52,190 @@ void SectionStack::addTextSeparatorSlot(
 		st::defaultDividerLabel.bar,
 		RectPart::Top | RectPart::Bottom));
 	Ui::AddSkip(inner.data(), st::infoProfileSkip);
-	const auto wrap = _layout->add(
+	const auto wrap = layout->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			_layout,
+			layout,
 			std::move(inner)));
-	if (trailing.textSetup) {
-		trailing.textSetup(rawLabel);
+	if (setup) {
+		setup(rawLabel);
 	}
-	auto self = rpl::duplicate(_sections[sectionIndex].shown);
-	auto upper = anyShownAtOrBefore(sectionIndex);
-	auto lower = anyShownAfter(sectionIndex);
-	auto shown = rpl::combine(
-		std::move(self),
-		std::move(upper),
-		std::move(lower)
-	) | rpl::map([](bool s, bool u, bool l) {
-		return s && u && l;
-	}) | rpl::distinct_until_changed();
-	wrap->setDuration(st::infoSlideDuration)->toggleOn(std::move(shown));
+	return wrap;
+}
+
+} // namespace
+
+SectionStack::SectionStack(not_null<Ui::VerticalLayout*> layout)
+: _layout(layout) {
+}
+
+void SectionStack::add(Section section) {
+	Expects(!_finalized);
+	Expects(section.widget != nullptr);
+
+	_rows.push_back({
+		.type = RowType::Block,
+		.widget = std::move(section.widget),
+		.shown = std::move(section.shown),
+	});
+}
+
+void SectionStack::addPlainSeparator() {
+	Expects(!_finalized);
+
+	if (_rows.empty() || _rows.back().type == RowType::PlainSeparator) {
+		return;
+	}
+	_rows.push_back({ .type = RowType::PlainSeparator });
+}
+
+void SectionStack::addTextSeparator(
+		rpl::producer<TextWithEntities> text,
+		rpl::producer<bool> shown,
+		Fn<void(not_null<Ui::FlatLabel*>)> setup) {
+	Expects(!_finalized);
+
+	_rows.push_back({
+		.type = RowType::TextSeparator,
+		.shown = std::move(shown),
+		.text = std::move(text),
+		.textSetup = std::move(setup),
+	});
+}
+
+not_null<Ui::VerticalLayout*> SectionStack::layout() const {
+	return _layout;
+}
+
+// Decides which separators are visible given the intrinsic visibility of
+// every row. Blocks and text separators are shown by their own data; the
+// computation only resolves plain separators, which exist purely to delimit
+// content. A plain separator stays visible only when there is a visible block
+// in the run immediately above and the run immediately below it, where each
+// run is bounded by the nearest visible divider on that side. Scanning down a
+// plain separator treats every later plain separator as a boundary so that, in
+// a single gap, the lowest plain separator wins; scanning up it sees through
+// plain separators that turned out hidden. Visible text separators bound runs
+// on both sides, which keeps a plain separator from doubling a text divider.
+std::vector<bool> SectionStack::ComputeVisibility(
+		const std::vector<RowType> &kinds,
+		const std::vector<bool> &intrinsic) {
+	const auto count = int(kinds.size());
+	auto result = std::vector<bool>(count, false);
+	for (auto i = 0; i != count; ++i) {
+		if (kinds[i] != RowType::PlainSeparator) {
+			result[i] = intrinsic[i];
+		}
+	}
+	const auto blockVisibleAbove = [&](int separator) {
+		for (auto j = separator - 1; j >= 0; --j) {
+			switch (kinds[j]) {
+			case RowType::Block:
+				if (intrinsic[j]) {
+					return true;
+				}
+				break;
+			case RowType::TextSeparator:
+				if (intrinsic[j]) {
+					return false;
+				}
+				break;
+			case RowType::PlainSeparator:
+				if (result[j]) {
+					return false;
+				}
+				break;
+			}
+		}
+		return false;
+	};
+	const auto blockVisibleBelow = [&](int separator) {
+		for (auto j = separator + 1; j != count; ++j) {
+			switch (kinds[j]) {
+			case RowType::Block:
+				if (intrinsic[j]) {
+					return true;
+				}
+				break;
+			case RowType::TextSeparator:
+				if (intrinsic[j]) {
+					return false;
+				}
+				break;
+			case RowType::PlainSeparator:
+				return false;
+			}
+		}
+		return false;
+	};
+	for (auto i = 0; i != count; ++i) {
+		if (kinds[i] == RowType::PlainSeparator) {
+			result[i] = blockVisibleAbove(i) && blockVisibleBelow(i);
+		}
+	}
+	return result;
 }
 
 void SectionStack::finalize() {
 	Expects(!_finalized);
 
 	_finalized = true;
-	for (auto &s : _sections) {
-		if (!s.shown) {
-			s.shown = rpl::single(true);
+
+	Ui::AddSkip(_layout, st::infoProfileSkip);
+
+	const auto count = int(_rows.size());
+	auto kinds = std::vector<RowType>();
+	auto intrinsic = std::vector<rpl::producer<bool>>();
+	auto separators = std::vector<Ui::SlideWrap<>*>(count, nullptr);
+	kinds.reserve(count);
+	intrinsic.reserve(count);
+	const auto shownOrTrue = [](rpl::producer<bool> shown) {
+		return shown
+			? std::move(shown)
+			: rpl::producer<bool>(rpl::single(true));
+	};
+	for (auto i = 0; i != count; ++i) {
+		auto &row = _rows[i];
+		kinds.push_back(row.type);
+		switch (row.type) {
+		case RowType::Block:
+			_layout->add(std::move(row.widget));
+			intrinsic.push_back(shownOrTrue(std::move(row.shown)));
+			break;
+		case RowType::PlainSeparator:
+			separators[i] = CreatePlainSeparator(_layout);
+			intrinsic.push_back(rpl::single(true));
+			break;
+		case RowType::TextSeparator:
+			separators[i] = CreateTextSeparator(
+				_layout,
+				std::move(row.text),
+				std::move(row.textSetup));
+			intrinsic.push_back(shownOrTrue(std::move(row.shown)));
+			break;
 		}
 	}
 
 	Ui::AddSkip(_layout, st::infoProfileSkip);
 
-	const auto sectionCount = int(_sections.size());
-	const auto markerCandidates = _layout->lifetime().make_state<
-		std::vector<rpl::variable<bool>>>();
-	markerCandidates->reserve(_plainMarkerAfter.size());
-	for (auto m = 0; m != int(_plainMarkerAfter.size()); ++m) {
-		const auto position = _plainMarkerAfter[m];
-		markerCandidates->emplace_back(
-			computePlainMarkerCandidate(position));
+	if (intrinsic.empty()) {
+		return;
 	}
-
-	auto nextMarker = 0;
-	for (auto i = 0; i != sectionCount; ++i) {
-		auto &section = _sections[i];
-		Expects(section.widget != nullptr);
-
-		_layout->add(std::move(section.widget));
-
-		const auto hasText = (section.trailing.kind
-			== SectionSeparator::Kind::Text);
-		if (hasText && i + 1 < sectionCount) {
-			addTextSeparatorSlot(i, section.trailing);
+	const auto visible = _layout->lifetime().make_state<
+		rpl::variable<std::vector<bool>>>(rpl::combine(
+			std::move(intrinsic),
+			[kinds = std::move(kinds)](const std::vector<bool> &values) {
+				return SectionStack::ComputeVisibility(kinds, values);
+			}));
+	for (auto i = 0; i != count; ++i) {
+		const auto wrap = separators[i];
+		if (!wrap) {
+			continue;
 		}
-		auto textVisible = hasText
-			? (rpl::duplicate(_sections[i].shown) | rpl::type_erased)
-			: (rpl::single(false) | rpl::type_erased);
-
-		while (nextMarker != int(_plainMarkerAfter.size())
-			&& _plainMarkerAfter[nextMarker] == i) {
-			addPlainMarkerSlot(
-				nextMarker,
-				markerCandidates,
-				rpl::duplicate(textVisible));
-			++nextMarker;
-		}
+		wrap->setDuration(st::infoSlideDuration)->toggleOn(
+			visible->value() | rpl::map([=](const std::vector<bool> &v) {
+				return (i < int(v.size())) && v[i];
+			}) | rpl::distinct_until_changed());
 	}
-
-	Ui::AddSkip(_layout, st::infoProfileSkip);
 }
 
 } // namespace Info::Profile

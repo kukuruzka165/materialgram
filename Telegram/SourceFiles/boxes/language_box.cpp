@@ -514,7 +514,11 @@ bool Rows::hasMenu(not_null<const Row*> row) const {
 void Rows::share(not_null<const Row*> row) const {
 	const auto link = u"https://t.me/setlanguage/"_q + row->data.id;
 	QGuiApplication::clipboard()->setText(link);
-	Ui::Toast::Show(tr::lng_username_copied(tr::now));
+	Ui::Toast::Show({
+		.text = { tr::lng_username_copied(tr::now) },
+		.iconLottie = u"toast/voip_invite"_q,
+		.iconLottieSize = st::toastLottieIconSize,
+	});
 }
 
 void Rows::remove(not_null<Row*> row) {

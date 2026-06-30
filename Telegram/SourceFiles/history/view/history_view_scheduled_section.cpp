@@ -779,11 +779,12 @@ void ScheduledWidget::edit(
 		}
 		return;
 	} else {
-		const auto maxCaptionSize = !hasMediaWithCaption
-			? MaxMessageSize
-			: Data::PremiumLimits(&session()).captionLengthCurrent();
+		const auto limits = Data::PremiumLimits(&session());
+		const auto maxTextSize = hasMediaWithCaption
+			? limits.captionLengthCurrent()
+			: limits.messageLengthCurrent();
 		const auto remove = _composeControls->fieldCharacterCount()
-			- maxCaptionSize;
+			- maxTextSize;
 		if (remove > 0) {
 			controller()->showToast(
 				tr::lng_edit_limit_reached(tr::now, lt_count, remove));

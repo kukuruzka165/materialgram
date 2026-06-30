@@ -19,19 +19,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Iv::Markdown {
 namespace {
 
-constexpr auto kMaxVisualListDepth = 6;
-constexpr auto kMaxVisualQuoteDepth = 3;
-
 [[nodiscard]] QString DetailsAnchorId(PrepareState *state) {
 	return u"details-"_q + QString::number(++state->nextGeneratedId);
 }
 
 [[nodiscard]] int CappedListDepth(int depth) {
-	return std::min(depth, kMaxVisualListDepth);
+	return std::min(depth, std::max(PrepareLimitsForIv().visualListDepth, 0));
 }
 
 [[nodiscard]] int CappedQuoteDepth(int depth) {
-	return std::min(depth, kMaxVisualQuoteDepth);
+	return std::min(depth, std::max(PrepareLimitsForIv().visualQuoteDepth, 0));
 }
 
 [[nodiscard]] int ScaleFormulaCap(int cap, int textSize, int baseTextSize) {
@@ -153,15 +150,8 @@ void PrepareTableCellText(
 
 [[nodiscard]] bool ShouldFlattenTable(
 		const MarkdownNode &node,
-		PrepareContext context,
 		PrepareState *state) {
-	const auto &limits = PrepareLimitsForIv().tableRender;
-	if (context.listDepth > 0 || context.quoteDepth > 0) {
-		if (state) {
-			state->addPrepareWarning();
-		}
-		return true;
-	}
+	const auto &limits = PrepareMarkdownTableRenderLimitsForIv();
 	if (node.children.empty()) {
 		if (state) {
 			state->addPrepareWarning();
@@ -224,7 +214,7 @@ void PrepareTableCellText(
 		PrepareContext context,
 	PrepareState *state) {
 	const auto columnCount = EffectiveTableColumnCount(node);
-	if (ShouldFlattenTable(node, context, state) || !columnCount) {
+	if (ShouldFlattenTable(node, state) || !columnCount) {
 		return PrepareFallbackBlocks(node, context, state);
 	}
 

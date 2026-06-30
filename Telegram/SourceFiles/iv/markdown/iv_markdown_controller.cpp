@@ -371,6 +371,43 @@ void Controller::setContent(
 			refreshed.initialFragment = _history[activeIndex].hash;
 		}
 	}
+	if (preserveScroll
+		&& _preview
+		&& historyEnabled(refreshed)) {
+		auto activeIndex = -1;
+		if (_shownHistoryIndex >= 0
+			&& _shownHistoryIndex < int(_history.size())) {
+			activeIndex = _shownHistoryIndex;
+		} else if (_historyIndex >= 0
+			&& _historyIndex < int(_history.size())) {
+			activeIndex = _historyIndex;
+		}
+		if (activeIndex >= 0
+			&& sameHistoryLocation(
+				_history[activeIndex],
+				refreshed.currentPageId,
+				refreshed.sourceUrl,
+				refreshed.initialFragment)) {
+			_title = std::move(title);
+			if (_menu) {
+				_menu = nullptr;
+				_menuToggle->setForceRippled(false);
+			}
+			const auto updated = updateExistingPreview(
+				std::move(content),
+				std::move(refreshed),
+				scrollTop);
+			Assert(updated);
+			if (updated) {
+				refreshTitle();
+				if (_window && _window->isActiveWindow() && _preview) {
+					_preview->setFocus();
+				}
+				updateHistoryButtons();
+			}
+			return;
+		}
+	}
 	if (historyEnabled(refreshed)
 		&& _shownHistoryIndex >= 0
 		&& _shownHistoryIndex < int(_history.size())
@@ -421,6 +458,54 @@ void Controller::setContent(
 		_preview->setFocus();
 	}
 	updateHistoryButtons();
+}
+
+bool Controller::updateExistingPreview(
+		MarkdownArticleContent content,
+		OpenOptions options,
+		int scrollTop) {
+	Expects(_preview != nullptr);
+
+	_preparedContent = std::move(content);
+	_options = std::move(options);
+	_clickHandlerContextRef = ResolveClickHandlerContextRef(
+		_clickHandlerContextRef,
+		_options);
+	_options.clickHandlerContextRef = _clickHandlerContextRef;
+	auto previewOptions = _options;
+	previewOptions.clickHandlerContextRef = _clickHandlerContextRef;
+	previewOptions.clickHandlerContext = ExtendClickHandlerContext(
+		std::move(previewOptions.clickHandlerContext),
+		_show);
+	if (previewOptions.clickHandlerContextRef) {
+		*previewOptions.clickHandlerContextRef
+			= previewOptions.clickHandlerContext;
+	}
+	if (historyEnabled(_options)) {
+		updateCurrentHistoryEntry(*_preparedContent, _title, _options);
+		const auto index = findHistoryEntry(
+			_options.currentPageId,
+			_options.sourceUrl,
+			_options.initialFragment);
+		Assert(index >= 0);
+		if (index >= 0) {
+			_historyIndex = index;
+			_shownHistoryIndex = index;
+		}
+	} else {
+		_historyIndex = -1;
+		_shownHistoryIndex = -1;
+	}
+	previewOptions.initialFragment = QString();
+	if (!UpdateMarkdownPreviewWidget(
+			_preview.get(),
+			std::move(*_preparedContent),
+			previewOptions)) {
+		return false;
+	}
+	_preparedContent.reset();
+	ScrollMarkdownPreviewToY(_preview.get(), scrollTop);
+	return true;
 }
 
 void Controller::updateOptions(OpenOptions options) {
@@ -528,6 +613,15 @@ bool Controller::sameHistoryPage(
 		: (!sourceUrl.isEmpty() && entry.sourceUrl == sourceUrl);
 }
 
+bool Controller::sameCurrentPage(uint64 pageId, const QString &sourceUrl) const {
+	return (pageId != 0
+		&& _options.currentPageId != 0
+		&& pageId == _options.currentPageId)
+		|| (!sourceUrl.isEmpty()
+			&& !_options.sourceUrl.isEmpty()
+			&& sourceUrl == _options.sourceUrl);
+}
+
 bool Controller::sameHistoryLocation(
 		const HistoryEntry &entry,
 		uint64 pageId,
@@ -623,19 +717,33 @@ void Controller::handleOpenPage(Event event) {
 		_events.fire(std::move(event));
 		return;
 	}
-	const auto currentIndex = (_historyIndex >= 0 && _historyIndex < int(_history.size()))
+	const auto currentIndex = (_historyIndex >= 0
+		&& _historyIndex < int(_history.size()))
 		? _historyIndex
 		: -1;
 	const auto current = (currentIndex >= 0) ? &_history[currentIndex] : nullptr;
-	const auto samePage = current
-		&& sameHistoryPage(*current, target.pageId, target.sourceUrl);
-	const auto currentEntry = samePage ? *current : HistoryEntry();
-	if (samePage
-		&& sameHistoryLocation(
-			*current,
-			target.pageId,
-			target.sourceUrl,
-			target.hash)) {
+	const auto samePage = sameCurrentPage(target.pageId, target.sourceUrl)
+		|| (current
+			&& sameHistoryPage(*current, target.pageId, target.sourceUrl));
+	if (samePage) {
+		if (target.hash.isEmpty()) {
+			if (_preview) {
+				ScrollMarkdownPreviewToY(
+					_preview.get(),
+					0,
+					MarkdownPreviewScrollMode::Animated);
+			}
+			return;
+		}
+		if (_preview
+			&& ScrollMarkdownPreviewToAnchor(
+				_preview.get(),
+				target.hash,
+				MarkdownPreviewScrollMode::Animated)) {
+			return;
+		}
+		DEBUG_LOG(("Native Markdown IV: unresolved anchor: %1"
+			).arg(target.hash));
 		return;
 	}
 	saveCurrentHistoryScroll();
@@ -648,7 +756,7 @@ void Controller::handleOpenPage(Event event) {
 			target.hash)) {
 		targetIndex = _historyIndex + 1;
 	} else {
-		auto options = samePage ? currentEntry.options : _options;
+		auto options = _options;
 		options.sourceUrl = target.sourceUrl;
 		options.initialFragment = target.hash;
 		options.currentPageId = target.pageId;
@@ -670,27 +778,6 @@ void Controller::handleOpenPage(Event event) {
 	entry.options.currentPageId = target.pageId;
 	_historyIndex = targetIndex;
 	updateHistoryButtons();
-	if (samePage) {
-		if (showHistoryEntry(targetIndex)) {
-			return;
-		}
-		if (_preview) {
-			if (target.hash.isEmpty()) {
-				ScrollMarkdownPreviewToY(_preview.get(), 0);
-			}
-			if (target.hash.isEmpty()
-				|| ScrollMarkdownPreviewToAnchor(_preview.get(), target.hash)) {
-				entry.title = _title;
-				entry.preparedContent = currentEntry.preparedContent;
-				entry.scrollTop = MarkdownPreviewScrollTop(_preview.get());
-				_options.initialFragment = target.hash;
-				_shownHistoryIndex = targetIndex;
-				return;
-			}
-		}
-		_events.fire(std::move(event));
-		return;
-	}
 	if (!showHistoryEntry(targetIndex)) {
 		event.url = ComposePageHistoryUrl(target);
 		_events.fire(std::move(event));
@@ -836,13 +923,15 @@ void Controller::showMenu() {
 	}));
 	_menuToggle->setForceRippled(true);
 
-	const auto action = _menu->addAction(
-		OpenSourceLabel(viewerKind()),
-		crl::guard(_window.get(), [=] {
-			openSource();
-		}),
-		OpenSourceIcon(viewerKind()));
-	action->setEnabled(canOpenSource());
+	const auto hasOpenSource = canOpenSource();
+	if (hasOpenSource) {
+		_menu->addAction(
+			OpenSourceLabel(viewerKind()),
+			crl::guard(_window.get(), [=] {
+				openSource();
+			}),
+			OpenSourceIcon(viewerKind()));
+	}
 
 	if (canShare()) {
 		_menu->addAction(
@@ -853,7 +942,9 @@ void Controller::showMenu() {
 			&st::menuIconShare);
 	}
 
-	_menu->addSeparator();
+	if (hasOpenSource || canShare()) {
+		_menu->addSeparator();
+	}
 	_menu->addAction(CreateZoomMenuAction(_menu, _delegate));
 
 	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
@@ -892,6 +983,7 @@ void Controller::createPreview() {
 		case Event::Type::Close:
 		case Event::Type::Quit:
 		case Event::Type::OpenFile:
+		case Event::Type::Report:
 			_events.fire(std::move(event));
 			break;
 		}

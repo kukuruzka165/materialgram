@@ -407,6 +407,7 @@ private:
 		std::optional<bool> noForwards;
 		std::optional<bool> joinToWrite;
 		std::optional<bool> requestToJoin;
+		std::optional<bool> requestToJoinApplyToInvites;
 		std::optional<ChannelData*> discussionLink;
 		std::optional<int> starsPerDirectMessage;
 	};
@@ -873,7 +874,7 @@ void Controller::refreshHistoryVisibility() {
 		(!withUsername
 			&& !_channelHasLocationOriginalValue
 			&& (!_discussionLinkSavedValue || !*_discussionLinkSavedValue)
-			&& (!_forumSavedValue || !*_forumSavedValue)),
+			&& !_forumSavedValue.value_or(_peer->isForum())),
 		anim::type::instant);
 }
 
@@ -884,6 +885,16 @@ void Controller::showEditPeerTypeBox(
 		_typeDataSavedValue = data;
 		refreshHistoryVisibility();
 	});
+	if (const auto channel = _peer->asChannel()) {
+		const auto guardBot = channel->guardBot();
+		const auto guardBotUsername = guardBot
+			? guardBot->username()
+			: QString();
+		_typeDataSavedValue->guardBotUsername = guardBotUsername;
+		_typeDataSavedValue->guardBotLink = guardBotUsername.isEmpty()
+			? QString()
+			: _peer->session().createInternalLink(guardBotUsername);
+	}
 	_typeDataSavedValue->hasDiscussionLink
 		= (_discussionLinkSavedValue.value_or(nullptr) != nullptr);
 	const auto box = _navigation->parentController()->show(
@@ -989,6 +1000,10 @@ void Controller::fillPrivacyTypeButton() {
 	// Create Privacy Button.
 	const auto hasLocation = _peer->isChannel()
 		&& _peer->asChannel()->hasLocation();
+	const auto guardBot = _peer->isChannel()
+		? _peer->asChannel()->guardBot()
+		: nullptr;
+	const auto guardBotUsername = guardBot ? guardBot->username() : QString();
 	_typeDataSavedValue = EditPeerTypeData{
 		.privacy = ((_peer->isChannel()
 			&& _peer->asChannel()->hasUsername())
@@ -1003,8 +1018,12 @@ void Controller::fillPrivacyTypeButton() {
 		.noForwards = !_peer->allowsForwarding(),
 		.joinToWrite = (_peer->isMegagroup()
 			&& _peer->asChannel()->joinToWrite()),
-		.requestToJoin = (_peer->isMegagroup()
+		.requestToJoin = (_peer->isChannel()
 			&& _peer->asChannel()->requestToJoin()),
+		.guardBotUsername = guardBotUsername,
+		.guardBotLink = guardBotUsername.isEmpty()
+			? QString()
+			: _peer->session().createInternalLink(guardBotUsername),
 	};
 	const auto isGroup = (_peer->isChat() || _peer->isMegagroup());
 	AddButtonWithText(
@@ -2233,6 +2252,8 @@ bool Controller::validateRequestToJoin(Saving &to) const {
 		return true;
 	}
 	to.requestToJoin = _typeDataSavedValue->requestToJoin;
+	to.requestToJoinApplyToInvites
+		= _typeDataSavedValue->requestToJoinApplyToInvites;
 	return true;
 }
 
@@ -2792,15 +2813,22 @@ void Controller::saveJoinToWrite() {
 }
 
 void Controller::saveRequestToJoin() {
-	const auto requestToJoin = _peer->isMegagroup()
+	const auto requestToJoin = _peer->isChannel()
 		&& _peer->asChannel()->requestToJoin();
 	if (!_savingData.requestToJoin
 		|| *_savingData.requestToJoin == requestToJoin) {
 		return continueSave();
 	}
+	using Flag = MTPchannels_ToggleJoinRequest::Flag;
+	const auto channel = _peer->asChannel();
+	const auto flags = _savingData.requestToJoinApplyToInvites.value_or(false)
+		? Flag::f_apply_to_invites
+		: Flag();
 	_api.request(MTPchannels_ToggleJoinRequest(
-		_peer->asChannel()->inputChannel(),
-		MTP_bool(*_savingData.requestToJoin)
+		MTP_flags(flags),
+		channel->inputChannel(),
+		MTP_bool(*_savingData.requestToJoin),
+		MTP_inputUserEmpty()
 	)).done([=](const MTPUpdates &result) {
 		_peer->session().api().applyUpdates(result);
 		continueSave();

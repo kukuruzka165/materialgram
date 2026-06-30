@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/chat/message_bubble.h"
 
+#include <memory>
+
 struct WebPageData;
 struct TodoListItem;
 class DocumentData;
@@ -27,7 +29,12 @@ namespace Ui {
 struct ChatPaintContext;
 class ChatStyle;
 struct PeerUserpicView;
+struct VoiceOnceParticles;
 } // namespace Ui
+
+namespace Ui::Paint {
+class Blobs;
+} // namespace Ui::Paint
 
 namespace Ui::Text {
 struct GeometryDescriptor;
@@ -47,6 +54,10 @@ class RoundPainter;
 namespace Images {
 struct CornersMaskRef;
 } // namespace Images
+
+namespace Iv {
+struct RichPage;
+} // namespace Iv
 
 namespace HistoryView {
 class Element;
@@ -131,9 +142,21 @@ struct HistoryMessageEdited
 
 struct HistoryMessageMediaForInstantView
 : RuntimeComponent<HistoryMessageMediaForInstantView, HistoryItem> {
+	using Item = std::variant<PhotoData*, DocumentData*>;
+
 	QString url;
 	base::flat_set<not_null<DocumentData*>> documents;
 	base::flat_set<not_null<PhotoData*>> photos;
+	std::vector<Item> items;
+	std::vector<TextWithEntities> captions;
+};
+
+struct HistoryMessageRichPageSource
+: RuntimeComponent<HistoryMessageRichPageSource, HistoryItem> {
+	std::shared_ptr<const Iv::RichPage> page;
+	std::shared_ptr<const Iv::RichPage> fullPage;
+	uint64 fullPageVersion = 0;
+	bool canEdit = false;
 };
 
 class HiddenSenderInfo {
@@ -907,10 +930,14 @@ struct HistoryDocumentNamed
 
 struct HistoryDocumentVoicePlayback {
 	HistoryDocumentVoicePlayback(const HistoryView::Document *that);
+	~HistoryDocumentVoicePlayback();
 
 	int32 position = 0;
 	anim::value progress;
 	Ui::Animations::Basic progressAnimation;
+
+	std::unique_ptr<Ui::Paint::Blobs> blobs;
+	crl::time blobsLastUpdate = 0;
 };
 
 class HistoryDocumentVoice
@@ -937,6 +964,8 @@ public:
 	std::unique_ptr<HistoryView::TranscribeButton> transcribe;
 	Ui::Text::String transcribeText;
 	std::unique_ptr<Media::Player::RoundPainter> round;
+
+	mutable std::unique_ptr<Ui::VoiceOnceParticles> once;
 
 private:
 	bool _seeking = false;

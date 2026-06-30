@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "base/platform/base_platform_info.h"
-#include "base/qt_signal_producer.h"
 #include "base/unixtime.h"
 #include "boxes/share_box.h"
 #include "core/application.h"
@@ -18,60 +17,37 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
-#include "data/data_cloud_file.h"
-#include "data/data_document.h"
-#include "data/data_document_media.h"
-#include "data/data_file_origin.h"
-#include "data/data_location.h"
-#include "data/data_media_types.h"
-#include "data/data_photo_media.h"
 #include "data/data_session.h"
-#include "data/data_thread.h"
 #include "data/data_web_page.h"
-#include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
-#include "history/history_item_helpers.h"
-#include "info/profile/info_profile_values.h"
+#include "iv/markdown/iv_markdown_article.h"
 #include "iv/markdown/iv_markdown_controller.h"
 #include "iv/iv_cached_media.h"
 #include "iv/iv_controller.h"
 #include "iv/iv_data.h"
-#include "iv/iv_prepare.h"
+#include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
-#include "lottie/lottie_common.h" // Lottie::ReadContent.
-#include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/session/session_show.h"
-#include "media/streaming/media_streaming_loader.h"
 #include "media/view/media_view_open_common.h"
-#include "storage/file_download.h"
 #include "storage/storage_account.h"
-#include "ui/boxes/confirm_box.h"
-#include "ui/layers/layer_widget.h"
-#include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/basic_click_handlers.h"
-#include "webview/webview_data_stream_memory.h"
-#include "webview/webview_interface.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
 
+#include "styles/style_iv.h"
+
 #include <QtCore/QByteArray>
 #include <QtCore/QFileInfo>
-#include <QtGui/QGuiApplication>
-#include <QtGui/QWindow>
 
 #include <optional>
 
 namespace Iv {
 namespace {
 
-constexpr auto kGeoPointScale = 1;
-constexpr auto kGeoPointZoomMin = 13;
-constexpr auto kMaxLoadParts = 5;
-constexpr auto kKeepLoadingParts = 8;
 constexpr auto kAllowPageReloadAfter = 3 * crl::time(1000);
 
 struct NativeIvChannelContext {
@@ -179,6 +155,126 @@ struct LocalMarkdownTarget {
 	return peer->allowsForwarding() && !item->forbidsForward();
 }
 
+[[nodiscard]] QString RichMessageKey(FullMsgId itemId) {
+	return u"rich-message:%1:%2"_q
+		.arg(itemId.peer.value)
+		.arg(itemId.msg.bare);
+}
+
+[[nodiscard]] uint64 RichMessagePageId(FullMsgId itemId) {
+	return uint64(itemId.peer.value) ^ (uint64(itemId.msg.bare) << 1);
+}
+
+[[nodiscard]] bool PreparedContentHasAnchor(
+		const Markdown::MarkdownArticleContent &content,
+		const QString &anchorId) {
+	if (anchorId.isEmpty()) {
+		return false;
+	}
+	auto article = Markdown::MarkdownArticle(st::defaultMarkdown);
+	article.setContent(content);
+	const auto width = article.maxWidth();
+	static_cast<void>(article.resizeGetHeight(width));
+	auto top = article.anchorTop(anchorId);
+	if (top < 0) {
+		const auto expansion = article.expandDetailsToAnchor(anchorId);
+		if (expansion.changed) {
+			static_cast<void>(article.resizeGetHeight(width));
+		}
+		top = article.anchorTop(anchorId);
+	}
+	return (top >= 0);
+}
+
+void OpenRichMessageChannel(
+		not_null<Main::Session*> session,
+		const QString &context) {
+	const auto parsed = ParseNativeIvChannelContext(context);
+	if (const auto channelId = ChannelId(parsed.channelId)) {
+		const auto channel = session->data().channel(channelId);
+		if (channel->isLoaded()) {
+			if (const auto controller = session->tryResolveWindow(channel)) {
+				controller->showPeerHistory(channel);
+			}
+		} else if (const auto username = ResolveNativeIvChannelUsername(
+				channel->username(),
+				parsed.username); !username.isEmpty()) {
+			if (const auto controller = session->tryResolveWindow(channel)) {
+				controller->showPeerByLink({
+					.usernameOrId = username,
+				});
+			}
+		}
+	}
+}
+
+void JoinRichMessageChannel(
+		not_null<Main::Session*> session,
+		const QString &context) {
+	const auto parsed = ParseNativeIvChannelContext(context);
+	if (const auto channelId = ChannelId(parsed.channelId)) {
+		const auto channel = session->data().channel(channelId);
+		if (channel->isLoaded()) {
+			session->api().joinChannel(channel);
+		} else if (const auto username = ResolveNativeIvChannelUsername(
+				channel->username(),
+				parsed.username); !username.isEmpty()) {
+			if (const auto controller = session->tryResolveWindow(channel)) {
+				controller->showPeerByLink({
+					.usernameOrId = username,
+					.joinChannel = true,
+				});
+			}
+		}
+	}
+}
+
+[[nodiscard]] bool ActivateRichMessageMedia(
+		const Markdown::MediaActivation &activation,
+		Qt::MouseButton button,
+		const QVariant &clickHandlerContext) {
+	if (button != Qt::LeftButton && button != Qt::MiddleButton) {
+		return false;
+	}
+	switch (activation.kind) {
+	case Markdown::MediaActivationKind::None:
+		return false;
+	case Markdown::MediaActivationKind::ExternalUrl:
+		if (activation.url.isEmpty()) {
+			return false;
+		}
+		HiddenUrlClickHandler::Open(activation.url, clickHandlerContext);
+		return true;
+	case Markdown::MediaActivationKind::Embed:
+		return false;
+	case Markdown::MediaActivationKind::Photo:
+		if (!activation.photo) {
+			return false;
+		}
+		activation.photo->open(button);
+		return true;
+	case Markdown::MediaActivationKind::Document:
+		if (!activation.document) {
+			return false;
+		}
+		activation.document->open(button);
+		return true;
+	case Markdown::MediaActivationKind::OpenChannel:
+		if (!activation.channel) {
+			return false;
+		}
+		activation.channel->open(button);
+		return true;
+	case Markdown::MediaActivationKind::JoinChannel:
+		if (!activation.channel) {
+			return false;
+		}
+		activation.channel->join(button);
+		return true;
+	}
+	return false;
+}
+
 [[nodiscard]] Markdown::OpenOptions PrepareLocalMarkdownOptions(
 		QVariant context) {
 	auto options = Markdown::OpenOptions{
@@ -243,30 +339,7 @@ public:
 	}
 
 private:
-	struct MapPreview {
-		std::unique_ptr<::Data::CloudFile> file;
-		QByteArray bytes;
-	};
-	struct PartRequest {
-		Webview::DataRequest request;
-		QByteArray data;
-		std::vector<bool> loaded;
-		int64 offset = 0;
-	};
-	struct FileStream {
-		not_null<DocumentData*> document;
-		std::unique_ptr<::Media::Streaming::Loader> loader;
-		std::vector<PartRequest> requests;
-		std::string mime;
-		rpl::lifetime lifetime;
-	};
-	struct FileLoad {
-		std::shared_ptr<::Data::DocumentMedia> media;
-		std::vector<Webview::DataRequest> requests;
-	};
-
 	void prepare(not_null<Data*> data, const QString &hash);
-	void createController();
 	void createMarkdownController(
 		Markdown::MarkdownArticleContent content,
 		QString title,
@@ -276,70 +349,30 @@ private:
 		QString initialFragment,
 		not_null<WebPageData*> page);
 
-	void showWindowed(Prepared result, Source source, bool refresh);
-	void showHtmlWindowed(Prepared result, bool refresh);
 	void showMarkdownWindowed(
 		Markdown::MarkdownArticleContent content,
 		QString title,
 		QString initialFragment,
 		not_null<WebPageData*> page,
 		bool refresh);
-	[[nodiscard]] ShareBoxResult shareBox(ShareBoxDescriptor &&descriptor);
 	[[nodiscard]] std::shared_ptr<Markdown::MediaRuntime> createMediaRuntime(
-		not_null<WebPageData*> page) const;
+		not_null<WebPageData*> page);
 	[[nodiscard]] bool activateMarkdownMedia(
 		const Markdown::MediaActivation &activation,
 		Qt::MouseButton button,
 		const QVariant &clickHandlerContext) const;
 
-	[[nodiscard]] ::Data::FileOrigin fileOrigin(
-		not_null<WebPageData*> page) const;
-	void streamPhoto(QStringView idWithPageId, Webview::DataRequest request);
-	void streamFile(QStringView idWithPageId, Webview::DataRequest request);
-	void streamFile(FileStream &file, Webview::DataRequest request);
-	void processPartInFile(
-		FileStream &file,
-		::Media::Streaming::LoadedPart &&part);
-	bool finishRequestWithPart(
-		PartRequest &request,
-		const ::Media::Streaming::LoadedPart &part);
-	void streamMap(QString params, Webview::DataRequest request);
-	void sendEmbed(QByteArray hash, Webview::DataRequest request);
-
-	void fillChannelJoinedValues(const Prepared &result);
-	void fillEmbeds(base::flat_map<QByteArray, QByteArray> added);
-	void subscribeToDocuments();
-	[[nodiscard]] QByteArray readFile(
-		const std::shared_ptr<::Data::DocumentMedia> &media);
-	void requestDone(
-		Webview::DataRequest request,
-		QByteArray bytes,
-		std::string mime,
-		int64 offset = 0,
-		int64 total = 0);
-	void requestFail(Webview::DataRequest request);
-
 	const not_null<Delegate*> _delegate;
 	const not_null<Main::Session*> _session;
 	const Fn<void(QString)> _openChannel;
 	const Fn<void(QString)> _joinChannel;
-	std::shared_ptr<Main::SessionShow> _show;
 	QString _id;
-	std::unique_ptr<Controller> _controller;
 	std::unique_ptr<Markdown::Controller> _markdownController;
-	base::flat_map<DocumentId, FileStream> _streams;
-	base::flat_map<DocumentId, FileLoad> _files;
-	base::flat_map<QByteArray, rpl::producer<bool>> _inChannelValues;
-
-	bool _preparing = false;
-
-	base::flat_map<QByteArray, QByteArray> _embeds;
-	base::flat_map<QString, MapPreview> _maps;
-	std::vector<QByteArray> _resources;
+	std::shared_ptr<Markdown::MediaRuntime> _markdownMediaRuntime;
+	QString _markdownRuntimeUrl;
 
 	rpl::event_stream<Controller::Event> _events;
 
-	rpl::lifetime _documentLifetime;
 	rpl::lifetime _lifetime;
 
 };
@@ -377,73 +410,6 @@ private:
 
 };
 
-struct MarkdownShown {
-	std::unique_ptr<Markdown::Controller> controller;
-};
-
-class ShareBoxShow final : public Ui::Show {
-public:
-	ShareBoxShow(QPointer<QWidget> parent, Fn<Ui::LayerStackWidget*()> lookup);
-
-	void showOrHideBoxOrLayer(
-			std::variant<
-			v::null_t,
-			object_ptr<Ui::BoxContent>,
-			std::unique_ptr<Ui::LayerWidget>> &&layer,
-			Ui::LayerOptions options,
-			anim::type animated) const override;
-
-	not_null<QWidget*> toastParent() const override;
-
-	bool valid() const override;
-
-	operator bool() const override;
-
-private:
-	const QPointer<QWidget> _parent;
-	const Fn<Ui::LayerStackWidget*()> _lookup;
-};
-
-ShareBoxShow::ShareBoxShow(
-	QPointer<QWidget> parent,
-	Fn<Ui::LayerStackWidget*()> lookup)
-: _parent(parent)
-, _lookup(lookup) {
-}
-
-void ShareBoxShow::showOrHideBoxOrLayer(
-		std::variant<
-		v::null_t,
-		object_ptr<Ui::BoxContent>,
-		std::unique_ptr<Ui::LayerWidget>> &&layer,
-		Ui::LayerOptions options,
-		anim::type animated) const {
-	using UniqueLayer = std::unique_ptr<Ui::LayerWidget>;
-	using ObjectBox = object_ptr<Ui::BoxContent>;
-	const auto stack = _lookup();
-	if (!stack) {
-		return;
-	} else if (auto layerWidget = std::get_if<UniqueLayer>(&layer)) {
-		stack->showLayer(std::move(*layerWidget), options, animated);
-	} else if (auto box = std::get_if<ObjectBox>(&layer)) {
-		stack->showBox(std::move(*box), options, animated);
-	} else {
-		stack->hideAll(animated);
-	}
-}
-
-not_null<QWidget*> ShareBoxShow::toastParent() const {
-	return _parent.data();
-}
-
-bool ShareBoxShow::valid() const {
-	return _lookup() != nullptr;
-}
-
-ShareBoxShow::operator bool() const {
-	return valid();
-}
-
 Shown::Shown(
 	not_null<Delegate*> delegate,
 	not_null<Main::Session*> session,
@@ -459,150 +425,26 @@ Shown::Shown(
 }
 
 void Shown::prepare(not_null<Data*> data, const QString &hash) {
-	const auto weak = base::make_weak(this);
-	const auto source = data->source();
+	const auto richPage = data->richPage();
+	const auto id = data->id();
+	const auto page = _session->data().webpage(data->pageId());
 
-	_preparing = true;
-	const auto id = _id = data->id();
-	data->prepare({}, [=, source = source](Prepared result) {
-		result.hash = hash;
-		crl::on_main(weak, [=, source = source, result = std::move(result)]() mutable {
-			result.url = id;
-			if (_id != id || !_preparing) {
-				return;
-			}
-			_preparing = false;
-			fillChannelJoinedValues(result);
-			fillEmbeds(std::move(result.embeds));
-			showWindowed(std::move(result), source, false);
-		});
-	});
-}
-
-void Shown::fillChannelJoinedValues(const Prepared &result) {
-	for (const auto &id : result.channelIds) {
-		const auto channelId = ChannelId(id.toLongLong());
-		const auto channel = _session->data().channel(channelId);
-		if (!channel->isLoaded() && !channel->username().isEmpty()) {
-			channel->session().api().request(MTPcontacts_ResolveUsername(
-				MTP_flags(0),
-				MTP_string(channel->username()),
-				MTP_string()
-			)).done([=](const MTPcontacts_ResolvedPeer &result) {
-				channel->owner().processUsers(result.data().vusers());
-				channel->owner().processChats(result.data().vchats());
-			}).send();
-		}
-		_inChannelValues[id] = Info::Profile::AmInChannelValue(channel);
+	if (_markdownRuntimeUrl != id) {
+		_markdownMediaRuntime = nullptr;
+		_markdownRuntimeUrl = QString();
 	}
-}
+	_id = id;
 
-void Shown::fillEmbeds(base::flat_map<QByteArray, QByteArray> added) {
-	if (_embeds.empty()) {
-		_embeds = std::move(added);
-	} else {
-		for (auto &[k, v] : added) {
-			_embeds[k] = std::move(v);
-		}
-	}
-}
-
-ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
-	const auto url = descriptor.url;
-	const auto wrap = descriptor.parent;
-
-	struct State {
-		Ui::LayerStackWidget *stack = nullptr;
-		rpl::event_stream<> destroyRequests;
-	};
-	const auto state = wrap->lifetime().make_state<State>();
-
-	const auto weak = base::make_weak(wrap);
-	const auto lookup = crl::guard(weak, [state] { return state->stack; });
-	const auto layer = Ui::CreateChild<Ui::LayerStackWidget>(
-		wrap.get(),
-		[=] { return std::make_shared<ShareBoxShow>(weak.get(), lookup); });
-	state->stack = layer;
-	const auto show = layer->showFactory()();
-
-	layer->setHideByBackgroundClick(false);
-	layer->move(0, 0);
-	wrap->sizeValue(
-	) | rpl::on_next([=](QSize size) {
-		layer->resize(size);
-	}, layer->lifetime());
-	layer->hideFinishEvents(
-	) | rpl::filter([=] {
-		return !!lookup(); // Last hide finish is sent from destructor.
-	}) | rpl::on_next([=] {
-		state->destroyRequests.fire({});
-	}, wrap->lifetime());
-
-	const auto waiting = layer->lifetime().make_state<rpl::lifetime>();
-	const auto focus = crl::guard(layer, [=] {
-		const auto set = [=] {
-			layer->window()->setFocus();
-			layer->setInnerFocus();
-		};
-
-		const auto handle = layer->window()->windowHandle();
-		if (!handle) {
-			waiting->destroy();
-			return;
-		} else if (QGuiApplication::focusWindow() == handle) {
-			waiting->destroy();
-			set();
-		} else {
-			*waiting = base::qt_signal_producer(
-				qApp,
-				&QGuiApplication::focusWindowChanged
-			) | rpl::filter([=](QWindow *focused) {
-				const auto handle = layer->window()->windowHandle();
-				return handle && (focused == handle);
-			}) | rpl::on_next([=] {
-				waiting->destroy();
-				set();
-			});
-			layer->window()->activateWindow();
-		}
+	auto prepared = Markdown::TryPrepareNativeInstantView({
+		.richPage = richPage,
+		.mediaRuntime = createMediaRuntime(page),
 	});
-	auto result = ShareBoxResult{
-		.focus = focus,
-		.hide = [=] { show->hideLayer(); },
-		.destroyRequests = state->destroyRequests.events(),
-	};
-
-	FastShareLink(Main::MakeSessionShow(show, _session), url);
-	return result;
-}
-
-void Shown::createController() {
-	Expects(!_controller);
-
-	const auto showShareBox = [=](ShareBoxDescriptor &&descriptor) {
-		return shareBox(std::move(descriptor));
-	};
-	_controller = std::make_unique<Controller>(
-		_delegate,
-		std::move(showShareBox));
-
-	_controller->events(
-	) | rpl::start_to_stream(_events, _controller->lifetime());
-
-	_controller->dataRequests(
-	) | rpl::on_next([=](Webview::DataRequest request) {
-		const auto requested = QString::fromStdString(request.id);
-		const auto id = QStringView(requested);
-		if (id.startsWith(u"photo/")) {
-			streamPhoto(id.mid(6), std::move(request));
-		} else if (id.startsWith(u"document/"_q)) {
-			streamFile(id.mid(9), std::move(request));
-		} else if (id.startsWith(u"map/"_q)) {
-			streamMap(id.mid(4).toUtf8(), std::move(request));
-		} else if (id.startsWith(u"html/"_q)) {
-			sendEmbed(id.mid(5).toUtf8(), std::move(request));
-		}
-	}, _controller->lifetime());
+	showMarkdownWindowed(
+		std::move(prepared.content),
+		data->name(),
+		hash,
+		page,
+		false);
 }
 
 Markdown::OpenOptions Shown::markdownOpenOptions(
@@ -616,26 +458,6 @@ Markdown::OpenOptions Shown::markdownOpenOptions(
 		.currentPageId = page->id,
 		.viewerKind = Markdown::ViewerKind::InstantView,
 		.clickHandlerContextRef = clickHandlerContext,
-		.ivWebviewDataRequest = [=](
-				QByteArray id,
-				Webview::DataRequest request) {
-			const auto requested = QString::fromUtf8(id);
-			const auto view = QStringView(requested);
-			if (view.startsWith(u"photo/")) {
-				streamPhoto(view.mid(6), std::move(request));
-				return Webview::DataResult::Pending;
-			} else if (view.startsWith(u"document/"_q)) {
-				streamFile(view.mid(9), std::move(request));
-				return Webview::DataResult::Pending;
-			} else if (view.startsWith(u"map/"_q)) {
-				streamMap(view.mid(4).toString().toUtf8(), std::move(request));
-				return Webview::DataResult::Pending;
-			} else if (view.startsWith(u"html/"_q)) {
-				sendEmbed(view.mid(5).toString().toUtf8(), std::move(request));
-				return Webview::DataResult::Pending;
-			}
-			return Webview::DataResult::Failed;
-		},
 		.ivWebviewStorageId = _session->local().resolveStorageIdOther(),
 		.activateMedia = [=](
 				const Markdown::MediaActivation &activation,
@@ -684,47 +506,19 @@ void Shown::createMarkdownController(
 				.type = ToType::OpenPage,
 				.url = event.url,
 				.context = QString::number(event.webpageId),
+				.webpageId = event.webpageId,
 			});
 			break;
 		case FromType::OpenFile:
 			break;
+		case FromType::Report:
+			_events.fire({
+				.type = ToType::Report,
+				.context = QString::number(event.webpageId),
+			});
+			break;
 		}
 	}, _markdownController->lifetime());
-}
-
-void Shown::showWindowed(Prepared result, Source source, bool refresh) {
-	if constexpr (true) {
-		const auto page = _session->data().webpage(result.pageId);
-		auto native = Markdown::TryPrepareNativeInstantView({
-			.source = &source,
-			.mediaRuntime = createMediaRuntime(page),
-		});
-		showMarkdownWindowed(
-			std::move(native.content),
-			std::move(result.name),
-			std::move(result.hash),
-			page,
-			refresh);
-	} else {
-		Q_UNUSED(source);
-		showHtmlWindowed(std::move(result), refresh);
-	}
-}
-
-void Shown::showHtmlWindowed(Prepared result, bool refresh) {
-	_markdownController = nullptr;
-	const auto hadController = (_controller != nullptr);
-	if (!_controller) {
-		createController();
-	}
-	if (refresh && hadController) {
-		_controller->update(std::move(result));
-	} else {
-		_controller->show(
-			_session->local().resolveStorageIdOther(),
-			std::move(result),
-			base::duplicate(_inChannelValues));
-	}
 }
 
 void Shown::showMarkdownWindowed(
@@ -733,7 +527,6 @@ void Shown::showMarkdownWindowed(
 		QString initialFragment,
 		not_null<WebPageData*> page,
 		bool refresh) {
-	_controller = nullptr;
 	if (!_markdownController) {
 		createMarkdownController(
 			std::move(content),
@@ -758,12 +551,17 @@ void Shown::showMarkdownWindowed(
 }
 
 std::shared_ptr<Markdown::MediaRuntime> Shown::createMediaRuntime(
-		not_null<WebPageData*> page) const {
-	return CreateCachedPageMediaRuntime(
+		not_null<WebPageData*> page) {
+	if (_markdownMediaRuntime && (page->url == _markdownRuntimeUrl)) {
+		return _markdownMediaRuntime;
+	}
+	_markdownRuntimeUrl = page->url;
+	_markdownMediaRuntime = CreateCachedPageMediaRuntime(
 		_session,
 		page,
 		_openChannel,
 		_joinChannel);
+	return _markdownMediaRuntime;
 }
 
 bool Shown::activateMarkdownMedia(
@@ -812,320 +610,6 @@ bool Shown::activateMarkdownMedia(
 	return false;
 }
 
-::Data::FileOrigin Shown::fileOrigin(not_null<WebPageData*> page) const {
-	return ::Data::FileOriginWebPage{ page->url };
-}
-
-void Shown::streamPhoto(
-		QStringView idWithPageId,
-		Webview::DataRequest request) {
-	using namespace Data;
-
-	const auto parts = idWithPageId.split('/');
-	if (parts.size() != 2) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto photo = _session->data().photo(parts[0].toULongLong());
-	const auto page = _session->data().webpage(parts[1].toULongLong());
-	if (photo->isNull() || page->url.isEmpty()) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto media = photo->createMediaView();
-	media->wanted(PhotoSize::Large, fileOrigin(page));
-	const auto check = [=] {
-		if (!media->loaded() && !media->owner()->failed(PhotoSize::Large)) {
-			return false;
-		}
-		requestDone(
-			request,
-			media->imageBytes(PhotoSize::Large),
-			"image/jpeg");
-		return true;
-	};
-	if (!check()) {
-		photo->session().downloaderTaskFinished(
-		) | rpl::filter(
-			check
-		) | rpl::take(1) | rpl::start(_controller->lifetime());
-	}
-}
-
-void Shown::streamFile(
-		QStringView idWithPageId,
-		Webview::DataRequest request) {
-	using namespace Data;
-
-	const auto parts = idWithPageId.split('/');
-	if (parts.size() != 2) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto documentId = DocumentId(parts[0].toULongLong());
-	const auto i = _streams.find(documentId);
-	if (i != end(_streams)) {
-		streamFile(i->second, std::move(request));
-		return;
-	}
-	const auto document = _session->data().document(documentId);
-	const auto page = _session->data().webpage(parts[1].toULongLong());
-	if (page->url.isEmpty()) {
-		requestFail(std::move(request));
-		return;
-	}
-	auto loader = document->createStreamingLoader(fileOrigin(page), false);
-	if (!loader) {
-		if (document->size >= Storage::kMaxFileInMemory) {
-			requestFail(std::move(request));
-		} else {
-			auto media = document->createMediaView();
-			if (const auto content = readFile(media); !content.isEmpty()) {
-				requestDone(
-					std::move(request),
-					content,
-					document->mimeString().toStdString());
-			} else {
-				subscribeToDocuments();
-				auto &file = _files[documentId];
-				file.media = std::move(media);
-				file.requests.push_back(std::move(request));
-				document->forceToCache(true);
-				document->save(fileOrigin(page), QString());
-			}
-		}
-		return;
-	}
-	auto &file = _streams.emplace(
-		documentId,
-		FileStream{
-			.document = document,
-			.loader = std::move(loader),
-			.mime = document->mimeString().toStdString(),
-		}).first->second;
-
-	file.loader->parts(
-	) | rpl::on_next([=](::Media::Streaming::LoadedPart &&part) {
-		const auto i = _streams.find(documentId);
-		Assert(i != end(_streams));
-		processPartInFile(i->second, std::move(part));
-	}, file.lifetime);
-
-	streamFile(file, std::move(request));
-}
-
-void Shown::streamFile(FileStream &file, Webview::DataRequest request) {
-	constexpr auto kPart = ::Media::Streaming::Loader::kPartSize;
-	const auto size = file.document->size;
-	const auto last = int((size + kPart - 1) / kPart);
-	const auto from = int(std::min(int64(request.offset), size) / kPart);
-	const auto till = (request.limit > 0)
-		? std::min(int64(request.offset + request.limit), size)
-		: size;
-	const auto parts = std::min(
-		int((till + kPart - 1) / kPart) - from,
-		kMaxLoadParts);
-	//auto base = IvBaseCacheKey(document);
-
-	const auto length = std::min((from + parts) * kPart, size)
-		- from * kPart;
-	file.requests.push_back(PartRequest{
-		.request = std::move(request),
-		.data = QByteArray(length, 0),
-		.loaded = std::vector<bool>(parts, false),
-		.offset = from * kPart,
-	});
-
-	file.loader->resetPriorities();
-	const auto load = std::min(from + kKeepLoadingParts, last) - from;
-	for (auto i = 0; i != load; ++i) {
-		file.loader->load((from + i) * kPart);
-	}
-}
-
-void Shown::subscribeToDocuments() {
-	if (_documentLifetime) {
-		return;
-	}
-	_documentLifetime = _session->data().documentLoadProgress(
-	) | rpl::filter([=](not_null<DocumentData*> document) {
-		return !document->loading();
-	}) | rpl::on_next([=](not_null<DocumentData*> document) {
-		const auto i = _files.find(document->id);
-		if (i == end(_files)) {
-			return;
-		}
-		auto requests = base::take(i->second.requests);
-		const auto content = readFile(i->second.media);
-		_files.erase(i);
-
-		if (!content.isEmpty()) {
-			for (auto &request : requests) {
-				requestDone(
-					std::move(request),
-					content,
-					document->mimeString().toStdString());
-			}
-		} else {
-			for (auto &request : requests) {
-				requestFail(std::move(request));
-			}
-		}
-	});
-}
-
-QByteArray Shown::readFile(
-		const std::shared_ptr<::Data::DocumentMedia> &media) {
-	return Lottie::ReadContent(media->bytes(), media->owner()->filepath());
-}
-
-void Shown::processPartInFile(
-		FileStream &file,
-		::Media::Streaming::LoadedPart &&part) {
-	for (auto i = begin(file.requests); i != end(file.requests);) {
-		if (finishRequestWithPart(*i, part)) {
-			auto done = base::take(*i);
-			i = file.requests.erase(i);
-			requestDone(
-				std::move(done.request),
-				done.data,
-				file.mime,
-				done.offset,
-				file.document->size);
-		} else {
-			++i;
-		}
-	}
-}
-
-bool Shown::finishRequestWithPart(
-		PartRequest &request,
-		const ::Media::Streaming::LoadedPart &part) {
-	const auto offset = part.offset;
-	if (offset == ::Media::Streaming::LoadedPart::kFailedOffset) {
-		request.data = QByteArray();
-		return true;
-	} else if (offset < request.offset
-		|| offset >= request.offset + request.data.size()) {
-		return false;
-	}
-	constexpr auto kPart = ::Media::Streaming::Loader::kPartSize;
-	const auto copy = std::min(
-		int(part.bytes.size()),
-		int(request.data.size() - (offset - request.offset)));
-	const auto index = (offset - request.offset) / kPart;
-	Assert(index < request.loaded.size());
-	if (request.loaded[index]) {
-		return false;
-	}
-	request.loaded[index] = true;
-	memcpy(
-		request.data.data() + index * kPart,
-		part.bytes.constData(),
-		copy);
-	return !ranges::contains(request.loaded, false);
-}
-
-void Shown::streamMap(QString params, Webview::DataRequest request) {
-	using namespace ::Data;
-
-	const auto parts = params.split(u'&');
-	if (parts.size() != 3) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto point = GeoPointFromId(parts[0].toUtf8());
-	const auto size = parts[1].split(',');
-	const auto zoom = parts[2].toInt();
-	if (size.size() != 2) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto location = GeoPointLocation{
-		.lat = point.lat,
-		.lon = point.lon,
-		.access = point.access,
-		.width = size[0].toInt(),
-		.height = size[1].toInt(),
-		.zoom = std::max(zoom, kGeoPointZoomMin),
-		.scale = kGeoPointScale,
-	};
-	const auto prepared = ImageWithLocation{
-		.location = ImageLocation(
-			{ location },
-			location.width,
-			location.height)
-	};
-	auto &preview = _maps.emplace(params, MapPreview()).first->second;
-	preview.file = std::make_unique<CloudFile>();
-
-	UpdateCloudFile(
-		*preview.file,
-		prepared,
-		_session->data().cache(),
-		kImageCacheTag,
-		[=](FileOrigin origin) { /* restartLoader not used here */ });
-	const auto autoLoading = false;
-	const auto finalCheck = [=] { return true; };
-	const auto done = [=](QByteArray bytes) {
-		const auto i = _maps.find(params);
-		Assert(i != end(_maps));
-		i->second.bytes = std::move(bytes);
-		requestDone(request, i->second.bytes, "image/png");
-	};
-	LoadCloudFile(
-		_session,
-		*preview.file,
-		FileOrigin(),
-		LoadFromCloudOrLocal,
-		autoLoading,
-		kImageCacheTag,
-		finalCheck,
-		done,
-		[=](bool) { done("failed..."); });
-}
-
-void Shown::sendEmbed(QByteArray hash, Webview::DataRequest request) {
-	const auto i = _embeds.find(hash);
-	if (i != end(_embeds)) {
-		requestDone(std::move(request), i->second, "text/html; charset=utf-8");
-	} else {
-		requestFail(std::move(request));
-	}
-}
-
-void Shown::requestDone(
-		Webview::DataRequest request,
-		QByteArray bytes,
-		std::string mime,
-		int64 offset,
-		int64 total) {
-	if (bytes.isEmpty() && mime.empty()) {
-		requestFail(std::move(request));
-		return;
-	}
-	crl::on_main([
-		done = std::move(request.done),
-		data = std::move(bytes),
-		mime = std::move(mime),
-		offset,
-		total
-	] {
-		using namespace Webview;
-		done({
-			.stream = std::make_unique<DataStreamFromMemory>(data, mime),
-			.streamOffset = offset,
-			.totalSize = total,
-		});
-	});
-}
-
-void Shown::requestFail(Webview::DataRequest request) {
-	crl::on_main([done = std::move(request.done)] {
-		done({});
-	});
-}
-
 bool Shown::showing(
 		not_null<Main::Session*> session,
 		not_null<Data*> data) const {
@@ -1137,12 +621,11 @@ bool Shown::showingFrom(not_null<Main::Session*> session) const {
 }
 
 bool Shown::activeFor(not_null<Main::Session*> session) const {
-	return showingFrom(session) && (_controller || _markdownController);
+	return showingFrom(session) && _markdownController;
 }
 
 bool Shown::active() const {
-	return (_controller && _controller->active())
-		|| (_markdownController && _markdownController->active());
+	return _markdownController && _markdownController->active();
 }
 
 void Shown::moveTo(not_null<Data*> data, QString hash) {
@@ -1150,32 +633,36 @@ void Shown::moveTo(not_null<Data*> data, QString hash) {
 }
 
 void Shown::update(not_null<Data*> data) {
-	const auto weak = base::make_weak(this);
-	const auto source = data->source();
-
+	const auto richPage = data->richPage();
 	const auto id = data->id();
-	data->prepare({}, [=, source = source](Prepared result) {
-		crl::on_main(weak, [=, source = source, result = std::move(result)]() mutable {
-			result.url = id;
-			fillChannelJoinedValues(result);
-			fillEmbeds(std::move(result.embeds));
-			showWindowed(std::move(result), source, true);
-		});
+
+	if (_markdownRuntimeUrl != id) {
+		_markdownMediaRuntime = nullptr;
+		_markdownRuntimeUrl = QString();
+	}
+	_id = id;
+
+	const auto page = _session->data().webpage(data->pageId());
+	auto prepared = Markdown::TryPrepareNativeInstantView({
+		.richPage = richPage,
+		.mediaRuntime = createMediaRuntime(page),
 	});
+	showMarkdownWindowed(
+		std::move(prepared.content),
+		data->name(),
+		QString(),
+		page,
+		true);
 }
 
 void Shown::showJoinedTooltip() {
-	if (_controller) {
-		_controller->showJoinedTooltip();
-	} else if (_markdownController) {
+	if (_markdownController) {
 		_markdownController->showJoinedTooltip();
 	}
 }
 
 void Shown::minimize() {
-	if (_controller) {
-		_controller->minimize();
-	} else if (_markdownController) {
+	if (_markdownController) {
 		_markdownController->minimize();
 	}
 }
@@ -1189,12 +676,7 @@ TonSite::TonSite(not_null<Delegate*> delegate, QString uri)
 void TonSite::createController() {
 	Expects(!_controller);
 
-	const auto showShareBox = [=](ShareBoxDescriptor &&descriptor) {
-		return ShareBoxResult();
-	};
-	_controller = std::make_unique<Controller>(
-		_delegate,
-		std::move(showShareBox));
+	_controller = std::make_unique<Controller>(_delegate);
 
 	_controller->events(
 	) | rpl::start_to_stream(_events, _controller->lifetime());
@@ -1231,20 +713,28 @@ void Instance::show(
 		not_null<Window::SessionController*> controller,
 		not_null<Data*> data,
 		QString hash) {
-	show(controller->uiShow(), data, hash);
+	showOpenedPage(&controller->session(), data, std::move(hash), true);
 }
 
 void Instance::show(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<Data*> data,
 		QString hash) {
-	this->show(&show->session(), data, hash);
+	showOpenedPage(&show->session(), data, std::move(hash), true);
 }
 
 void Instance::show(
 		not_null<Main::Session*> session,
 		not_null<Data*> data,
 		QString hash) {
+	showOpenedPage(session, data, std::move(hash), true);
+}
+
+void Instance::showOpenedPage(
+		not_null<Main::Session*> session,
+		not_null<Data*> data,
+		QString hash,
+		bool requestFullOnOpen) {
 	if (Platform::IsMac()) {
 		// Otherwise IV is not visible under the media viewer.
 		Core::App().hideMediaView();
@@ -1254,8 +744,11 @@ void Instance::show(
 		Core::App().saveSettingsDelayed();
 	}
 
+	primeFullRequest(session, data);
 	const auto guard = gsl::finally([&] {
-		requestFull(session, data->id());
+		if (requestFullOnOpen) {
+			requestFull(session, data->id());
+		}
 	});
 	if (_shown && _shownSession == session) {
 		_shown->moveTo(data, hash);
@@ -1347,17 +840,55 @@ void Instance::show(
 			}
 			const auto session = _shownSession;
 			const auto url = event.url;
-			auto &requested = _fullRequested[session][url];
+			const auto parts = event.url.split('#');
+			const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
+			if (event.webpageId) {
+				const auto page = session->data().webpage(
+					WebPageId(event.webpageId)).get();
+				if (page->iv) {
+					this->showOpenedPage(session, page->iv.get(), hash, false);
+					break;
+				}
+			}
+			const auto requestKey = event.webpageId
+				? QString::number(event.webpageId)
+				: url;
+			auto &requested = _fullRequested[session][requestKey];
+			if (event.webpageId) {
+				const auto page = session->data().webpage(
+					WebPageId(event.webpageId)).get();
+				if (page->iv) {
+					requested.page = page;
+					requested.hash = page->iv->hash();
+				} else {
+					requested.hash = 0;
+				}
+			}
 			requested.lastRequestedAt = crl::now();
 			session->api().request(MTPmessages_GetWebPage(
 				MTP_string(url),
 				MTP_int(requested.hash)
 			)).done([=](const MTPmessages_WebPage &result) {
-				const auto page = processReceivedPage(session, url, result);
-				if (page && page->iv) {
-					const auto parts = event.url.split('#');
-					const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
-					this->show(_shownSession, page->iv.get(), hash);
+				const auto processed = processReceivedPage(
+					session,
+					requestKey,
+					result);
+				if (const auto page = processed.page; page && page->iv) {
+					if (event.webpageId && page->id != event.webpageId) {
+						const auto expected = session->data().webpage(
+							WebPageId(event.webpageId)).get();
+						if (expected->iv) {
+							this->showOpenedPage(
+								session,
+								expected->iv.get(),
+								hash,
+								false);
+						} else {
+							UrlClickHandler::Open(event.url);
+						}
+						return;
+					}
+					this->showOpenedPage(session, page->iv.get(), hash, false);
 				} else {
 					UrlClickHandler::Open(event.url);
 				}
@@ -1396,14 +927,46 @@ void Instance::show(
 	trackSession(session);
 }
 
+void Instance::primeFullRequest(
+		not_null<Main::Session*> session,
+		not_null<Data*> data) {
+	auto &requested = _fullRequested[session][data->id()];
+	requested.page = session->data().webpage(data->pageId()).get();
+	requested.hash = data->hash();
+}
+
 void Instance::trackSession(not_null<Main::Session*> session) {
 	if (!_tracking.emplace(session).second) {
 		return;
 	}
+	session->data().sessionDataAboutToBeCleared(
+	) | rpl::on_next([=] {
+		closeSessionDataViews(session);
+	}, session->lifetime());
+	session->data().itemRemoved(
+	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+		closeMarkdownsForItem(session, item->fullId());
+	}, session->lifetime());
+	session->data().itemsAboutToBeDestroyed(
+	) | rpl::on_next([=](std::vector<not_null<HistoryItem*>> items) {
+		for (const auto &item : items) {
+			closeMarkdownsForItem(session, item->fullId());
+		}
+	}, session->lifetime());
 	session->lifetime().add([=] {
+		closeSessionDataViews(session);
 		_tracking.remove(session);
 		_joining.remove(session);
 		_fullRequested.remove(session);
+		if (const auto i = _richMessageRequested.find(session)
+			; i != end(_richMessageRequested)) {
+			for (const auto &[itemId, requested] : i->second) {
+				if (requested.requestId) {
+					session->api().request(requested.requestId).cancel();
+				}
+			}
+			_richMessageRequested.erase(i);
+		}
 		_ivCache.remove(session);
 		if (_ivRequestSession == session) {
 			session->api().request(_ivRequestId).cancel();
@@ -1411,13 +974,59 @@ void Instance::trackSession(not_null<Main::Session*> session) {
 			_ivRequestUri = QString();
 			_ivRequestId = 0;
 		}
-		if (_shownSession == session) {
-			_shownSession = nullptr;
-		}
-		if (_shown && _shown->showingFrom(session)) {
-			_shown = nullptr;
-		}
 	});
+}
+
+void Instance::bindMarkdown(
+		const QString &key,
+		not_null<Main::Session*> session,
+		FullMsgId itemId) {
+	_markdownBindings[key] = {
+		.session = session.get(),
+		.itemId = itemId,
+	};
+	trackSession(session);
+}
+
+void Instance::closeMarkdownsForItem(
+		not_null<Main::Session*> session,
+		FullMsgId itemId) {
+	if (!itemId) {
+		return;
+	}
+	auto keys = std::vector<QString>();
+	for (const auto &[key, binding] : _markdownBindings) {
+		if (binding.session == session.get() && binding.itemId == itemId) {
+			keys.push_back(key);
+		}
+	}
+	for (const auto &key : keys) {
+		_markdownBindings.remove(key);
+		_markdowns.take(key);
+	}
+}
+
+void Instance::closeMarkdownsForSession(not_null<Main::Session*> session) {
+	auto keys = std::vector<QString>();
+	for (const auto &[key, binding] : _markdownBindings) {
+		if (binding.session == session.get()) {
+			keys.push_back(key);
+		}
+	}
+	for (const auto &key : keys) {
+		_markdownBindings.remove(key);
+		_markdowns.take(key);
+	}
+}
+
+void Instance::closeSessionDataViews(not_null<Main::Session*> session) {
+	closeMarkdownsForSession(session);
+	if (_shownSession == session) {
+		_shownSession = nullptr;
+	}
+	if (_shown && _shown->showingFrom(session)) {
+		_shown = nullptr;
+	}
 }
 
 void Instance::openWithIvPreferred(
@@ -1449,8 +1058,6 @@ void Instance::openWithIvPreferred(
 	const auto parts = uri.split('#');
 	if (parts.isEmpty() || parts[0].isEmpty()) {
 		return;
-	} else if (!ShowButton()) {
-		return openExternal();
 	}
 	trackSession(session);
 	const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
@@ -1481,7 +1088,11 @@ void Instance::openWithIvPreferred(
 		_ivRequestUri = QString();
 		_ivRequestSession = nullptr;
 		_ivCache[session][url] = page;
-		openWithIvPreferred(session, uri, context);
+		if (page && page->iv) {
+			this->showOpenedPage(session, page->iv.get(), hash, false);
+		} else {
+			openExternal();
+		}
 	};
 	_ivRequestSession = session;
 	_ivRequestUri = uri;
@@ -1491,7 +1102,7 @@ void Instance::openWithIvPreferred(
 		MTP_string(url),
 		MTP_int(requested.hash)
 	)).done([=](const MTPmessages_WebPage &result) {
-		finish(processReceivedPage(session, url, result));
+		finish(processReceivedPage(session, url, result).page);
 	}).fail([=] {
 		finish(nullptr);
 	}).send();
@@ -1545,10 +1156,226 @@ void Instance::showTonSite(
 	}, _tonSite->lifetime());
 }
 
+Instance::RichMessageGeneration Instance::CaptureRichMessageGeneration(
+		not_null<HistoryItem*> item) {
+	auto generation = RichMessageGeneration();
+	generation.inlinePage = item->richPage();
+	generation.fullPage = item->fullRichPage();
+	generation.fullPageVersion = item->fullRichPageVersion();
+	return generation;
+}
+
+bool Instance::MatchesRichMessageGeneration(
+		not_null<HistoryItem*> item,
+		const RichMessageGeneration &generation) {
+	return (item->richPage() == generation.inlinePage)
+		&& (item->fullRichPage() == generation.fullPage)
+		&& (item->fullRichPageVersion() == generation.fullPageVersion);
+}
+
+void Instance::resolveRichMessage(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item,
+		RichMessageResolved done) {
+	if (const auto page = item->fullRichPage()) {
+		done(page);
+		return;
+	}
+	const auto richPage = item->richPage();
+	if (richPage && !richPage->part) {
+		done(richPage);
+		return;
+	}
+	const auto session = &controller->session();
+	const auto itemId = item->fullId();
+	const auto generation = CaptureRichMessageGeneration(item);
+	trackSession(session);
+	auto &requested = _richMessageRequested[session][itemId];
+	if (requested.requestId) {
+		if (MatchesRichMessageGeneration(item, requested.generation)) {
+			requested.callbacks.push_back(std::move(done));
+			return;
+		}
+		session->api().request(requested.requestId).cancel();
+		requested = RichMessageRequest();
+	}
+	requested.callbacks.push_back(std::move(done));
+	const auto now = crl::now();
+	if (requested.lastRequestedAt
+		&& MatchesRichMessageGeneration(item, requested.generation)
+		&& (now - requested.lastRequestedAt) < kAllowPageReloadAfter) {
+		finishRichMessageRequest(session, itemId, requested.token, nullptr);
+		return;
+	}
+	requested.lastRequestedAt = now;
+	requested.generation = generation;
+	requested.token = ++_nextRichMessageRequestToken;
+	const auto token = requested.token;
+	requested.requestId = session->api().request(MTPmessages_GetRichMessage(
+		item->history()->peer->input(),
+		MTP_int(item->id)
+	)).done([=](const MTPmessages_Messages &result) {
+		const auto processed = processReceivedRichMessage(
+			session,
+			itemId,
+			generation,
+			result);
+		finishRichMessageRequest(
+			session,
+			itemId,
+			token,
+			processed.page,
+			processed.notifyCallbacks);
+	}).fail([=] {
+		finishRichMessageRequest(
+			session,
+			itemId,
+			token,
+			nullptr);
+	}).send();
+}
+
+void Instance::showRichMessage(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item,
+		QString initialFragment) {
+	const auto weak = base::make_weak(controller);
+	const auto itemId = item->fullId();
+	resolveRichMessage(controller, item, [=](std::shared_ptr<const RichPage> page) {
+		const auto strong = weak.get();
+		const auto current = strong
+			? strong->session().data().message(itemId)
+			: nullptr;
+		if (!page || !current) {
+			if (strong && !page) {
+				Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
+			}
+			return;
+		}
+		showRichMessage(
+			not_null{ strong },
+			not_null{ current },
+			std::move(page),
+			initialFragment);
+	});
+}
+
+void Instance::showRichMessage(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item,
+		std::shared_ptr<const RichPage> richPage,
+		QString initialFragment) {
+	if (Platform::IsMac()) {
+		Core::App().hideMediaView();
+	}
+	const auto session = &controller->session();
+	const auto itemId = item->fullId();
+	const auto key = RichMessageKey(itemId);
+	const auto title = item->history()->peer->name();
+	auto clickHandlerContext = ClickHandlerContext();
+	clickHandlerContext.sessionWindow = controller;
+	clickHandlerContext.itemId = itemId;
+	auto context = QVariant::fromValue(clickHandlerContext);
+	auto mediaRuntime = CreateMessageMediaRuntime(
+		session,
+		itemId,
+		[=](QString context) {
+			OpenRichMessageChannel(session, context);
+		},
+		[=](QString context) {
+			JoinRichMessageChannel(session, context);
+		});
+	const auto richLimits = ResolveRichMessageLimits(session);
+	auto prepared = Markdown::TryPrepareNativeInstantView({
+		.richPage = richPage,
+		.mediaRuntime = std::move(mediaRuntime),
+		.tableRenderLimits = Markdown::PrepareTableRenderLimitsForRichMessage(
+			richLimits),
+	});
+	if (!prepared.supported()) {
+		Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
+		return;
+	}
+	if (!initialFragment.isEmpty()
+		&& !PreparedContentHasAnchor(prepared.content, initialFragment)) {
+		controller->showToast(tr::lng_iv_not_found_in_message(tr::now));
+		return;
+	}
+	auto options = Markdown::OpenOptions{
+		.sourceName = title,
+		.currentPageId = RichMessagePageId(itemId),
+		.viewerKind = Markdown::ViewerKind::InstantView,
+		.clickHandlerContext = context,
+		.activateMedia = [=](
+				const Markdown::MediaActivation &activation,
+				Qt::MouseButton button) {
+			return ActivateRichMessageMedia(activation, button, context);
+		},
+		.downloadTaskFinished = session->downloaderTaskFinished(),
+	};
+	options.initialFragment = std::move(initialFragment);
+	if (CanShareMarkdownItem(item)) {
+		options.share = [=](std::shared_ptr<Ui::Show> show) {
+			const auto current = session->data().message(itemId);
+			if (!show || !current || !CanShareMarkdownItem(not_null{ current })) {
+				return;
+			}
+			FastShareMessage(
+				Main::MakeSessionShow(show, not_null{ session }),
+				not_null{ current });
+		};
+	}
+
+	auto i = _markdowns.find(key);
+	if (i == end(_markdowns)) {
+		auto controller = std::make_unique<Markdown::Controller>(
+			_delegate,
+			std::move(prepared.content),
+			title,
+			nullptr,
+			std::move(options));
+		controller->events() | rpl::on_next([=](Markdown::Event event) {
+			using Type = Markdown::Event::Type;
+			switch (event.type) {
+			case Type::Close:
+				_markdownBindings.remove(key);
+				_markdowns.take(key);
+				break;
+			case Type::Quit:
+				Shortcuts::Launch(Shortcuts::Command::Quit);
+				break;
+			case Type::OpenPage:
+			case Type::OpenFile:
+				if (!event.url.isEmpty()) {
+					UrlClickHandler::Open(event.url, event.context);
+				}
+				break;
+			case Type::Report:
+				break;
+			}
+		}, controller->lifetime());
+		i = _markdowns.emplace(key, std::move(controller)).first;
+	} else {
+		i->second->show(
+			std::move(prepared.content),
+			title,
+			std::move(options));
+	}
+	bindMarkdown(key, session, itemId);
+	i->second->activate();
+}
+
 bool Instance::showMarkdown(
 		const QString &path,
 		QVariant context) {
 	const auto target = ParseLocalMarkdownTarget(path);
+	const auto messageContext = ExtractMarkdownMessageContext(context);
+	const auto session = messageContext
+		? ResolveMarkdownSession(*messageContext)
+		: nullptr;
+	const auto itemId = messageContext
+		? messageContext->clickHandlerContext.itemId
+		: FullMsgId();
 	auto options = PrepareLocalMarkdownOptions(context);
 	if (!target.sourceName.isEmpty()) {
 		options.sourceName = target.sourceName;
@@ -1565,10 +1392,13 @@ bool Instance::showMarkdown(
 				using Type = Markdown::Event::Type;
 				switch (event.type) {
 				case Type::Close:
+					_markdownBindings.remove(target.key);
 					_markdowns.take(target.key);
 					break;
 				case Type::Quit:
 					Shortcuts::Launch(Shortcuts::Command::Quit);
+					break;
+				case Type::Report:
 					break;
 				// Don't try opening markdown links inside markdown viewer,
 				// messenger-provided markdown files should know nothing
@@ -1591,6 +1421,11 @@ bool Instance::showMarkdown(
 	} else {
 		i->second->updateOptions(std::move(options));
 	}
+	if (session) {
+		bindMarkdown(target.key, not_null{ session }, itemId);
+	} else {
+		_markdownBindings.remove(target.key);
+	}
 	i->second->activate();
 	return true;
 }
@@ -1612,14 +1447,18 @@ void Instance::requestFull(
 		MTP_string(id),
 		MTP_int(requested.hash)
 	)).done([=](const MTPmessages_WebPage &result) {
-		const auto page = processReceivedPage(session, id, result);
-		if (page && page->iv && _shown && _shownSession == session) {
-			_shown->update(page->iv.get());
+		const auto processed = processReceivedPage(session, id, result);
+		if (processed.articleChanged
+			&& processed.page
+			&& processed.page->iv
+			&& _shown
+			&& _shownSession == session) {
+			_shown->update(processed.page->iv.get());
 		}
 	}).send();
 }
 
-WebPageData *Instance::processReceivedPage(
+Instance::ProcessReceivedPageResult Instance::processReceivedPage(
 		not_null<Main::Session*> session,
 		const QString &url,
 		const MTPmessages_WebPage &result) {
@@ -1628,21 +1467,110 @@ WebPageData *Instance::processReceivedPage(
 	owner->processUsers(data.vusers());
 	owner->processChats(data.vchats());
 	auto &requested = _fullRequested[session][url];
+	auto processed = ProcessReceivedPageResult();
 	const auto &mtp = data.vwebpage();
 	mtp.match([&](const MTPDwebPageNotModified &data) {
-		const auto page = requested.page;
-		if (const auto views = data.vcached_page_views()) {
-			if (page && page->iv) {
-				page->iv->updateCachedViews(views->v);
-			}
-		}
+		Q_UNUSED(data);
+
+		processed.page = requested.page;
 	}, [&](const MTPDwebPage &data) {
+		const auto oldPage = requested.page;
+		const auto oldVersion = oldPage ? oldPage->version : 0;
+		const auto oldIvHash = (oldPage && oldPage->iv)
+			? oldPage->iv->hash()
+			: 0;
 		requested.hash = data.vhash().v;
-		requested.page = owner->processWebpage(data).get();
+		processed.page = owner->processWebpage(data).get();
+		requested.page = processed.page;
+		processed.articleChanged = processed.page
+			&& processed.page->iv
+			&& (!oldPage
+				|| processed.page->version != oldVersion
+				|| processed.page->iv->hash() != oldIvHash);
 	}, [&](const auto &) {
-		requested.page = owner->processWebpage(mtp).get();
+		processed.page = owner->processWebpage(mtp).get();
+		requested.page = processed.page;
 	});
-	return requested.page;
+	return processed;
+}
+
+auto Instance::processReceivedRichMessage(
+	not_null<Main::Session*> session,
+	FullMsgId itemId,
+	const RichMessageGeneration &generation,
+	const MTPmessages_Messages &result)
+-> ProcessReceivedRichMessageResult {
+	const auto owner = &session->data();
+	auto processed = ProcessReceivedRichMessageResult();
+	auto page = std::shared_ptr<const RichPage>();
+	result.match([&](const MTPDmessages_messagesNotModified &) {
+		LOG(("API Error: received messages.messagesNotModified!"));
+	}, [&](const auto &data) {
+		owner->processUsers(data.vusers());
+		owner->processChats(data.vchats());
+		for (const auto &message : data.vmessages().v) {
+			if (message.type() != mtpc_message) {
+				continue;
+			}
+			const auto &parsed = message.c_message();
+			if (MsgId(parsed.vid().v) != itemId.msg) {
+				continue;
+			}
+			const auto richMessage = parsed.vrich_message();
+			page = richMessage ? ParseRichPage(session, *richMessage) : nullptr;
+			break;
+		}
+	});
+	const auto peer = owner->peer(itemId.peer);
+	result.match([&](const MTPDmessages_channelMessages &data) {
+		if (const auto channel = peer->asChannel()) {
+			channel->ptsReceived(data.vpts().v);
+		} else {
+			LOG(("App Error: received messages.channelMessages!"));
+		}
+	}, [](const auto &) {});
+	result.match([&](const MTPDmessages_messagesNotModified &) {
+	}, [&](const auto &data) {
+		peer->processTopics(data.vtopics());
+	});
+	const auto current = owner->message(itemId);
+	if (!current
+		|| !MatchesRichMessageGeneration(not_null{ current }, generation)) {
+		return processed;
+	}
+	if (page) {
+		current->setFullRichPage(page);
+	}
+	processed.page = std::move(page);
+	return processed;
+}
+
+void Instance::finishRichMessageRequest(
+		not_null<Main::Session*> session,
+		FullMsgId itemId,
+		uint64 token,
+		std::shared_ptr<const RichPage> page,
+		bool notifyCallbacks) {
+	const auto sessionIt = _richMessageRequested.find(session);
+	if (sessionIt == end(_richMessageRequested)) {
+		return;
+	}
+	const auto itemIt = sessionIt->second.find(itemId);
+	if (itemIt == end(sessionIt->second)) {
+		return;
+	}
+	if (itemIt->second.token != token) {
+		return;
+	}
+	auto callbacks = std::move(itemIt->second.callbacks);
+	itemIt->second.callbacks.clear();
+	itemIt->second.requestId = 0;
+	if (!notifyCallbacks) {
+		return;
+	}
+	for (auto &callback : callbacks) {
+		callback(page);
+	}
 }
 
 void Instance::processOpenChannel(const QString &context) {

@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h"
 #include "core/crash_report_window.h"
 #include "core/application.h"
+#include "core/external_control.h"
 #include "core/launcher.h"
 #include "core/local_url_handlers.h"
 #include "core/update_checker.h"
@@ -46,7 +47,6 @@ base::options::toggle OptionDeadlockDetector({
 	.id = kOptionDeadlockDetector,
 	.name = "Deadlock Detector",
 	.description = "Check once every 30 seconds that main thread is still responsive.",
-	.restartRequired = true,
 });
 
 } // namespace
@@ -199,10 +199,16 @@ void Sandbox::launchApplication() {
 		}
 		setupScreenScale();
 
-		if (OptionDeadlockDetector.value()) {
+		rpl::single(
+			rpl::empty
+		) | rpl::then(
+			OptionDeadlockDetector.changes()
+		) | rpl::on_next([=] {
 			using DeadlockDetector::PingThread;
-			_deadlockDetector = std::make_unique<PingThread>(this);
-		}
+			_deadlockDetector = OptionDeadlockDetector.value()
+				? std::make_unique<PingThread>(this)
+				: nullptr;
+		}, _lifetime);
 
 		_application = std::make_unique<Application>();
 
@@ -463,6 +469,13 @@ void Sandbox::readClients() {
 					if (!activationRequired) {
 						activationRequired = StartUrlRequiresActivate(startUrls.back().toString());
 					}
+				} else if (cmd.startsWith(u"CTRL:"_q)) {
+					const auto payload = HandleExternalControl(
+						cmds.mid(from + 5, to - from - 5));
+					const auto response = QByteArray("DATA:")
+						+ payload.toBase64()
+						+ ';';
+					i->first->write(response);
 				} else {
 					LOG(("Sandbox Error: unknown command %1 passed in local socket").arg(cmd.toString()));
 				}
@@ -577,17 +590,9 @@ void Sandbox::registerEnterFromEventLoop() {
 	}
 }
 
-bool Sandbox::notifyOrInvoke(QObject *receiver, QEvent *e) {
-	if (e->type() == base::InvokeQueuedEvent::Type()) {
-		static_cast<base::InvokeQueuedEvent*>(e)->invoke();
-		return true;
-	}
-	return QApplication::notify(receiver, e);
-}
-
 bool Sandbox::notify(QObject *receiver, QEvent *e) {
 	if (QThread::currentThreadId() != _mainThreadId) {
-		return notifyOrInvoke(receiver, e);
+		return QApplication::notify(receiver, e);
 	}
 
 	const auto wrap = createEventNestingLevel();
@@ -598,7 +603,7 @@ bool Sandbox::notify(QObject *receiver, QEvent *e) {
 			return true;
 		}
 	}
-	return notifyOrInvoke(receiver, e);
+	return QApplication::notify(receiver, e);
 }
 
 void Sandbox::processPostponedCalls(int level) {
