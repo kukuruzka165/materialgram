@@ -1262,7 +1262,7 @@ void BuildMaterialgramSection(SectionBuilder &builder) {
 
 	const auto registration = builder.addButton({
 		.id = u"advanced/materialgram_registration"_q,
-		.title = tr::materialgram_info_registration(),
+		.title = tr::lng_materialgram_info_registration(),
 		.st = &st::settingsButtonNoIcon,
 		.toggled = rpl::single(settings->birthDateEnabled()),
 		.keywords = { u"materialgram"_q, u"registration"_q, u"date"_q },
@@ -1279,7 +1279,7 @@ void BuildMaterialgramSection(SectionBuilder &builder) {
 
 	const auto datacenter = builder.addButton({
 		.id = u"advanced/materialgram_datacenter"_q,
-		.title = tr::materialgram_info_dc(),
+		.title = tr::lng_materialgram_info_dc(),
 		.st = &st::settingsButtonNoIcon,
 		.toggled = rpl::single(settings->datacenterEnabled()),
 		.keywords = { u"materialgram"_q, u"datacenter"_q, u"dc"_q },

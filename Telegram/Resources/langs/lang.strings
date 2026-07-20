@@ -383,7 +383,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_edit_caption_voice" = "Sorry, you can't edit messages when you have an unsent voice message.";
 
 "lng_intro_about" = "Welcome to the official Telegram Desktop app.\nIt's fast and secure.";
-"materialgram_intro_about" = "Thanks for installing!\nNew releases are available in @materialgram channel or on GitHub";
+"lng_materialgram_intro_about" = "Thanks for installing!\nNew releases are available in @materialgram channel or on GitHub";
 "lng_start_msgs" = "Start Messaging";
 
 "lng_intro_next" = "Next";
@@ -1326,8 +1326,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_faq" = "Telegram FAQ";
 "lng_settings_faq_subtitle" = "FAQ";
 "lng_settings_faq_link" = "https://telegram.org/faq#general-questions";
-"materialgram_settings_channel" = "@materialgram";
-"materialgram_settings_github" = "GitHub Releases";
+"lng_materialgram_settings_channel" = "@materialgram";
+"lng_materialgram_settings_github" = "GitHub Releases";
 "lng_settings_features" = "Telegram Features";
 "lng_settings_credits" = "My Stars";
 "lng_settings_currency" = "My Grams";
@@ -1769,8 +1769,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_via_link_shared_many#one" = "Link shared with **{count} user**.";
 "lng_via_link_shared_many#other" = "Link shared with **{count} users**.";
 
-"materialgram_info_registration" = "Registration date";
-"materialgram_info_dc" = "DC";
+"lng_materialgram_info_registration" = "Registration date";
+"lng_materialgram_info_dc" = "DC";
 "lng_info_personal_channel_label" = "Channel";
 "lng_info_mobile_label" = "Mobile";
 "lng_info_mobile_context_menu_fragment_about" = "This number is not tied to a SIM card and was acquired on {link}.";
@@ -5863,9 +5863,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_about_version" = "version {version}";
 "lng_about_text1" = "Official free messaging app based on {api_link}\nfor speed and security.";
 "lng_about_text1_api" = "Telegram API";
-"materialgram_about_text1" = "Feature list is available on {features_link}.";
-"materialgram_about_github" = "GitHub";
-"materialgram_about_text3" = "Made with ❤️ in 🇺🇦";
+"lng_materialgram_about_text1" = "Feature list is available on {features_link}.";
+"lng_materialgram_about_github" = "GitHub";
+"lng_materialgram_about_text3" = "Made with ❤️ in 🇺🇦";
 "lng_about_text2" = "This software is licensed under {gpl_link} version 3.\nSource code is available on {github_link}.";
 "lng_about_text3" = "Visit the {faq_link} for more info.";
 "lng_about_text3_faq" = "Telegram FAQ";

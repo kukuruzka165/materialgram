@@ -28,7 +28,7 @@ StartWidget::StartWidget(
 	Window::Theme::KeepApplied();
 	setMouseTracking(true);
 	setTitleText(rpl::single(u"materialgram"_q));
-	setDescriptionText(tr::materialgram_intro_about());
+	setDescriptionText(tr::lng_materialgram_intro_about());
 	show();
 }
 

@@ -530,7 +530,7 @@ void BuildHelpSection(SectionBuilder &builder) {
 
 	builder.addButton({
 		.id = u"materialgram-channel"_q,
-		.title = tr::materialgram_settings_channel(),
+		.title = tr::lng_materialgram_settings_channel(),
 		.icon = { &st::menuIconMaterialgram },
 		.onClick = [=] {
 			UrlClickHandler::Open("https://t.me/materialgram");
@@ -540,7 +540,7 @@ void BuildHelpSection(SectionBuilder &builder) {
 
 	builder.addButton({
 		.id = u"materialgram-releases"_q,
-		.title = tr::materialgram_settings_github(),
+		.title = tr::lng_materialgram_settings_github(),
 		.icon = { &st::menuIconGitHub },
 		.onClick = [=] {
 			UrlClickHandler::Open("https://github.com/kukuruzka165/materialgram/releases");

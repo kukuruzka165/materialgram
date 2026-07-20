@@ -717,7 +717,7 @@ void Instance::applyDifferenceToMe(
 	}
 	auto language = qs(difference.vlang_code()).trimmed().remove("-raw");
 	if (registrationStrings.contains(language)) {
-		applyValue("materialgram_info_registration", registrationStrings.value(language).toUtf8());
+		applyValue("lng_materialgram_info_registration", registrationStrings.value(language).toUtf8());
 	}
 	if (!_derived) {
 		_updated.fire({});
