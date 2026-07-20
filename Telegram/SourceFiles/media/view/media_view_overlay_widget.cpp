@@ -5874,8 +5874,8 @@ void OverlayWidget::refreshSystemMediaControls() {
 	auto video = SystemMediaControlsVideoSink::VideoState{
 		.title = title,
 		.artist = channel ? filename : _fromName,
-		.position = std::max(state.position, crl::time(0)),
-		.duration = std::max(state.length, crl::time(0)),
+		.position = std::max(crl::time(state.position), crl::time(0)),
+		.duration = std::max(crl::time(state.length), crl::time(0)),
 		.playing = (!player.paused() && !player.finished()),
 		.nextAvailable = _rightNavVisible,
 		.previousAvailable = _leftNavVisible,
