@@ -33,6 +33,7 @@ namespace Ui {
 class Show;
 class PopupMenu;
 class ChatTheme;
+class ElasticScroll;
 struct ChatPaintContext;
 struct ChatPaintContextArgs;
 enum class TouchScrollState;
@@ -68,6 +69,7 @@ struct SectionShow;
 
 namespace HistoryView {
 
+class AboutView;
 struct TextState;
 struct StateRequest;
 class ElementOverlayHost;
@@ -94,6 +96,7 @@ struct SelectedItem {
 	bool canForward = false;
 	bool canSendNow = false;
 	bool canReschedule = false;
+	bool ephemeral = false;
 };
 
 struct MessagesBar {
@@ -206,8 +209,9 @@ public:
 	virtual void listLaunchDrag(
 		std::unique_ptr<QMimeData> data,
 		Fn<void()> finished) = 0;
-	virtual Ui::ScrollArea *listScrollArea() const { return nullptr; }
+	virtual Ui::ElasticScroll *listScrollArea() const { return nullptr; }
 	virtual bool listThanosEffectEnabled() const { return true; }
+	virtual AboutView *listAboutView() { return nullptr; }
 };
 
 class WindowListDelegate : public ListDelegate {
@@ -254,6 +258,7 @@ struct SelectionData {
 	bool canForward = false;
 	bool canSendNow = false;
 	bool canReschedule = false;
+	bool ephemeral = false;
 };
 
 using SelectedMap = base::flat_map<
@@ -377,6 +382,7 @@ public:
 	[[nodiscard]] bool canConsumeHorizontalScroll(
 		QPoint position,
 		int delta) const;
+	bool consumeScrollAction(QPoint delta);
 
 	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(
 		int top) const;
@@ -495,6 +501,7 @@ public:
 	Qt::FocusPolicy accessibilityFocusPolicy() override {
 		return Qt::TabFocus;
 	}
+	Ui::AccessibilityState accessibilityState() const override;
 	int accessibilityChildCount() const override;
 	QString accessibilityChildName(int index) const override;
 	QAccessible::State accessibilityChildState(int index) const override;
@@ -506,6 +513,12 @@ public:
 		int row, int column) const override;
 	QString accessibilityChildSubItemValue(
 		int row, int column) const override;
+	bool accessibilityChildSupportsActions(int index) const override;
+	quintptr accessibilityChildIdentity(int index) const override;
+	int accessibilityChildIndexByIdentity(
+		quintptr identity) const override;
+	void accessibilityChildSetFocus(quintptr identity) override;
+	void accessibilityChildActivate(quintptr identity) override;
 
 	~ListWidget();
 
@@ -545,10 +558,16 @@ private:
 
 	[[nodiscard]] std::vector<Element*> accessibleElements() const;
 	[[nodiscard]] int accessibilityUnreadBarIndex() const;
+	[[nodiscard]] HistoryItem *accessibilityItemAtIndex(
+		int index,
+		const std::vector<Element*> &elements,
+		int barIndex) const;
 	void toggleMessageSelection();
 	void playPauseFocusedMedia();
 	void setAccessibilityFocusedItem(int index, HistoryItem *item);
 	void announceAccessibilityFocus(int index);
+	void applyAccessibilityFocus(int index, bool announceAlways);
+	void pruneAccessibilityIdentities();
 	[[nodiscard]] auto computeActiveColumns(int row) const
 		-> const std::vector<HistoryView::MessageSubItem> &;
 
@@ -741,6 +760,8 @@ private:
 		SelectedMap &applyTo,
 		not_null<HistoryItem*> item,
 		SelectAction action) const;
+	void changeAccessibilitySelection(int index, SelectAction action);
+	void extendAccessibilitySelection(int oldIndex, int newIndex);
 
 	SelectedMap::iterator itemUnderPressSelection();
 	SelectedMap::const_iterator itemUnderPressSelection() const;
@@ -930,6 +951,11 @@ private:
 
 	int _accessibilityFocusedIndex = -1;
 	HistoryItem *_accessibilityFocusedItem = nullptr;
+	HistoryItem *_accessibilitySelectionAnchor = nullptr;
+	mutable base::flat_map<
+		not_null<const HistoryItem*>,
+		quintptr> _accessibilityIdentities;
+	mutable quintptr _accessibilityIdentityCounter = 0;
 	mutable const HistoryView::Element *_activeColumnsView = nullptr;
 	mutable std::vector<HistoryView::MessageSubItem> _activeColumns;
 

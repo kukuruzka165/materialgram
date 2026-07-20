@@ -380,6 +380,44 @@ void AddViewMediaHandler(
 	}, thumb->lifetime());
 }
 
+[[nodiscard]] PeerId SpendPurposePeerId(
+		not_null<Data::Session*> owner,
+		const SmallBalanceSource &source) {
+	const auto peerIfBotOrChannel = [&](PeerId id) -> PeerId {
+		if (!id) {
+			return PeerId();
+		}
+		const auto peer = owner->peer(id);
+		if (const auto broadcast = peer->monoforumBroadcast()) {
+			return broadcast->id;
+		} else if (!peer->isBot() && !peer->isChannel()) {
+			return PeerId();
+		}
+		return id;
+	};
+	return v::match(source, [](SmallBalanceBot value) {
+		return value.botId ? peerFromUser(value.botId) : PeerId();
+	}, [](SmallBalanceReaction value) {
+		return value.channelId ? peerFromChannel(value.channelId) : PeerId();
+	}, [&](SmallBalanceVideoStream value) {
+		return peerIfBotOrChannel(value.streamerId);
+	}, [](SmallBalanceSubscription) {
+		return PeerId();
+	}, [](SmallBalanceDeepLink) {
+		return PeerId();
+	}, [](SmallBalanceStarGift) {
+		return PeerId();
+	}, [&](SmallBalanceForMessage value) {
+		return peerIfBotOrChannel(value.recipientId);
+	}, [&](SmallBalanceForSuggest value) {
+		return peerIfBotOrChannel(value.recipientId);
+	}, [](SmallBalanceForOffer) {
+		return PeerId();
+	}, [](SmallBalanceForSearch) {
+		return PeerId();
+	});
+}
+
 } // namespace
 
 void AddMiniStars(
@@ -3186,39 +3224,7 @@ void SmallBalanceBox(
 			}));
 	}();
 
-	const auto peerIfBotOrChannel = [owner](PeerId id) -> PeerId {
-		if (!id) {
-			return PeerId();
-		}
-		const auto peer = owner->peer(id);
-		if (const auto broadcast = peer->monoforumBroadcast()) {
-			return broadcast->id;
-		} else if (!peer->isBot() && !peer->isChannel()) {
-			return PeerId();
-		}
-		return id;
-	};
-	const auto purposePeerId = v::match(source, [](SmallBalanceBot value) {
-		return value.botId ? peerFromUser(value.botId) : PeerId();
-	}, [](SmallBalanceReaction value) {
-		return value.channelId ? peerFromChannel(value.channelId) : PeerId();
-	}, [=](SmallBalanceVideoStream value) {
-		return peerIfBotOrChannel(value.streamerId);
-	}, [](SmallBalanceSubscription) {
-		return PeerId();
-	}, [](SmallBalanceDeepLink) {
-		return PeerId();
-	}, [](SmallBalanceStarGift) {
-		return PeerId();
-	}, [=](SmallBalanceForMessage value) {
-		return peerIfBotOrChannel(value.recipientId);
-	}, [=](SmallBalanceForSuggest value) {
-		return peerIfBotOrChannel(value.recipientId);
-	}, [](SmallBalanceForOffer) {
-		return PeerId();
-	}, [](SmallBalanceForSearch) {
-		return PeerId();
-	});
+	const auto purposePeerId = SpendPurposePeerId(owner, source);
 
 	FillCreditOptions(
 		show,
@@ -3659,6 +3665,12 @@ void MaybeRequestBalanceIncrease(
 		if (CreditsAmount(credits) <= balance) {
 			if (const auto onstack = done) {
 				onstack(SmallBalanceResult::Already);
+			}
+		} else if (session->appConfig().starsSpendTopupInvoiceDisabled()
+			&& SpendPurposePeerId(&session->data(), source)) {
+			show->showToast(tr::lng_credits_topup_disabled(tr::now));
+			if (const auto onstack = done) {
+				onstack(SmallBalanceResult::Blocked);
 			}
 		} else if (show->session().premiumPossible()) {
 			const auto success = [=] {

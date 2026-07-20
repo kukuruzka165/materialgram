@@ -271,7 +271,9 @@ QByteArray Settings::serialize() const {
 			+ Serialize::bytearraySize(value);
 	}
 	size += sizeof(qint32) // _audioPlaybackSpeed
-		+ sizeof(qint32); // _mediaGridZoomStep
+		+ sizeof(qint32) // _mediaGridZoomStep
+		+ sizeof(qint32) // _pullToNextChannel
+		+ sizeof(qint32); // _chatFiltersTabsMode
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -450,6 +452,8 @@ QByteArray Settings::serialize() const {
 		}
 		stream << qint32(SerializePlaybackSpeed(_audioPlaybackSpeed.current()));
 		stream << qint32(_mediaGridZoomStep);
+		stream << qint32(_pullToNextChannel.current() ? 1 : 0);
+		stream << qint32(_chatFiltersTabsMode.current());
 	}
 
 	Ensures(result.size() == size);
@@ -556,6 +560,8 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 suggestAnimatedEmoji = _suggestAnimatedEmoji ? 1 : 0;
 	qint32 cornerReply = _cornerReply.current() ? 1 : 0;
 	qint32 cornerReaction = _cornerReaction.current() ? 1 : 0;
+	qint32 pullToNextChannel = _pullToNextChannel.current() ? 1 : 0;
+	qint32 chatFiltersTabsMode = qint32(_chatFiltersTabsMode.current());
 	qint32 legacySkipTranslationForLanguage = _translateButtonEnabled ? 1 : 0;
 	qint32 skipTranslationLanguagesCount = 0;
 	std::vector<LanguageId> skipTranslationLanguages;
@@ -989,6 +995,12 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 			_mediaGridZoomStep = step;
 		}
 	}
+	if (!stream.atEnd()) {
+		stream >> pullToNextChannel;
+	}
+	if (!stream.atEnd()) {
+		stream >> chatFiltersTabsMode;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1174,6 +1186,19 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_suggestAnimatedEmoji = (suggestAnimatedEmoji == 1);
 	_cornerReply = (cornerReply == 1);
 	_cornerReaction = (cornerReaction == 1);
+	_pullToNextChannel = (pullToNextChannel == 1);
+	{
+		using Mode = Ui::ChatsFiltersTabsMode;
+		const auto uncheckedChatFiltersTabsMode = static_cast<Mode>(
+			chatFiltersTabsMode);
+		switch (uncheckedChatFiltersTabsMode) {
+		case Mode::TextOnly:
+		case Mode::TextAndIcons:
+		case Mode::IconsOnly:
+			_chatFiltersTabsMode = uncheckedChatFiltersTabsMode;
+			break;
+		}
+	}
 	{ // Parse the legacy translation setting.
 		if (legacySkipTranslationForLanguage == 0) {
 			_translateButtonEnabled = false;
@@ -1669,6 +1694,8 @@ void Settings::resetOnLastLogout() {
 	_recordVideoMessages = false;
 	_videoQuality = {};
 	_chatFiltersHorizontal = false;
+	_chatFiltersTabsMode = Ui::ChatsFiltersTabsMode::TextOnly;
+	_pullToNextChannel = true;
 	_quickDialogAction = Dialogs::Ui::QuickDialogAction::Disabled;
 	_notificationsVolume = 100;
 
@@ -1878,6 +1905,19 @@ rpl::producer<bool> Settings::chatFiltersHorizontalChanges() const {
 
 void Settings::setChatFiltersHorizontal(bool value) {
 	_chatFiltersHorizontal = value;
+}
+
+Ui::ChatsFiltersTabsMode Settings::chatFiltersTabsMode() const {
+	return _chatFiltersTabsMode.current();
+}
+
+auto Settings::chatFiltersTabsModeValue() const
+-> rpl::producer<Ui::ChatsFiltersTabsMode> {
+	return _chatFiltersTabsMode.value();
+}
+
+void Settings::setChatFiltersTabsMode(Ui::ChatsFiltersTabsMode value) {
+	_chatFiltersTabsMode = value;
 }
 
 Dialogs::Ui::QuickDialogAction Settings::quickDialogAction() const {

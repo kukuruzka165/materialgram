@@ -402,10 +402,21 @@ void PeerBadge::paintEmojiStatusFrame(
 	if (!_emojiStatus || !_emojiStatus->emoji) {
 		return;
 	}
+	paintEmojiStatusFrame(p, now, paused, _emojiStatus->lastPosition);
+}
+
+void PeerBadge::paintEmojiStatusFrame(
+		QPainter &p,
+		crl::time now,
+		bool paused,
+		QPoint position) {
+	if (!_emojiStatus || !_emojiStatus->emoji) {
+		return;
+	}
 	_emojiStatus->emoji->paint(p, {
 		.textColor = _emojiStatus->lastColor,
 		.now = now,
-		.position = _emojiStatus->lastPosition,
+		.position = position,
 		.paused = paused || On(PowerSaving::kEmojiStatus),
 	});
 }

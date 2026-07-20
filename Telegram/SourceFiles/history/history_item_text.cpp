@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text.h"
 #include "ui/text/text_entity.h"
 #include "ui/text/text_options.h"
+#include "ui/text/text_utilities.h"
 
 namespace {
 
@@ -94,6 +95,38 @@ TextForMimeData HistoryItemMainText(not_null<HistoryItem*> item) {
 	return result;
 }
 
+[[nodiscard]] TextWithEntities StripIconEmoji(TextWithEntities text) {
+	auto i = text.entities.begin();
+	while (i != text.entities.end()) {
+		if (i->type() != EntityType::CustomEmoji
+			|| !Ui::Text::TryMakeSimpleEmoji(i->data())) {
+			++i;
+			continue;
+		}
+		const auto offset = i->offset();
+		const auto length = i->length();
+		text.text.remove(offset, length);
+		i = text.entities.erase(i);
+		const auto index = int(i - text.entities.begin());
+		for (auto &entity : text.entities) {
+			const auto till = entity.offset() + entity.length();
+			if (entity.offset() >= offset + length) {
+				entity.shiftLeft(length);
+			} else if (till > offset) {
+				entity.shrinkFromRight(std::min(till - offset, length));
+			}
+		}
+		i = text.entities.begin() + index;
+	}
+	text.entities.erase(
+		ranges::remove_if(text.entities, [](const EntityInText &entity) {
+			return (entity.length() <= 0);
+		}),
+		text.entities.end());
+	TextUtilities::Trim(text);
+	return text;
+}
+
 TextForMimeData BracketedSelectedCopyLabel(TextWithEntities label) {
 	label = TextUtilities::SingleLine(label);
 	if (label.empty()) {
@@ -108,7 +141,7 @@ TextForMimeData BracketedSelectedCopyLabel(TextWithEntities label) {
 }
 
 TextForMimeData SelectedCopyMediaLabel(not_null<Data::Media*> media) {
-	return BracketedSelectedCopyLabel(media->toPreview({
+	return BracketedSelectedCopyLabel(StripIconEmoji(media->toPreview({
 		.hideSender = true,
 		.hideCaption = true,
 		.ignoreMessageText = true,
@@ -116,7 +149,7 @@ TextForMimeData SelectedCopyMediaLabel(not_null<Data::Media*> media) {
 		.ignoreGroup = true,
 		.ignoreTopic = true,
 		.translated = true,
-	}).text);
+	}).text));
 }
 
 bool UsesSelectedCopyPlaceholder(not_null<Data::Media*> media) {
@@ -338,8 +371,8 @@ std::optional<SelectedCopyReplyContext> ReplyContextForSelectedCopy(
 	const auto &fields = reply->fields();
 	auto quote = (reply->manualQuote() && !fields.quote.empty())
 		? TextUtilities::SingleLine(fields.quote)
-		: LimitNonExactReplyPreview(ReplyPreviewTextForSelectedCopy(
-			replyPointer));
+		: LimitNonExactReplyPreview(StripIconEmoji(
+			ReplyPreviewTextForSelectedCopy(replyPointer)));
 	return SelectedCopyReplyContext{
 		.senderName = senderName,
 		.quote = TextForMimeData::WithExpandedLinks(quote),

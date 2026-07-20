@@ -1221,7 +1221,9 @@ void EnumerateDrafts(
 		const base::flat_map<Data::DraftKey, MessageDraftSource> &sources,
 		Callback &&callback) {
 	for (const auto &[key, draft] : map) {
-		if (key.isCloud() || sources.contains(key)) {
+		if (draft->hasRichMessage()) {
+			continue;
+		} else if (key.isCloud() || sources.contains(key)) {
 			continue;
 		} else if (key.isLocal()
 			&& (!supportMode || key.topicRootId())) {

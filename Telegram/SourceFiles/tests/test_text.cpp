@@ -363,7 +363,8 @@ QString name() {
 void test(not_null<Ui::RpWindow*> window, not_null<Ui::RpWidget*> body) {
 	(void)window;
 
-	const auto formulaEntityData = u"test-formula-like-object"_q;
+	const auto formulaEntityData =
+		u"iv-markdown:inline-text-object;formula;copy;tex"_q;
 	const auto formulaReplacementText = u"$\\frac{a}{b}$"_q;
 	const auto controlEntityData = u"test-custom-emoji"_q;
 	const auto formulaImage = MakeObjectImage(
@@ -435,6 +436,13 @@ void test(not_null<Ui::RpWindow*> window, not_null<Ui::RpWidget*> body) {
 	Expects(formulaMime.expanded == expectedFormulaExport);
 	Expects(formulaMime.rich.text == expectedFormulaExport);
 	Expects(!HasEntityType(formulaMime.rich.entities, EntityType::CustomEmoji));
+	Expects(formulaMime.tags.size() == 1);
+	const auto expectedFormulaTag = TextForMimeDataTag{
+		.offset = formulaPosition,
+		.length = int(formulaReplacementText.size()),
+		.id = Ui::InputField::kTagIvMath,
+	};
+	Expects(formulaMime.tags.front() == expectedFormulaTag);
 	const auto formulaRich = formulaText->toTextWithEntities();
 	Expects(formulaRich.text == expectedFormulaExport);
 	Expects(!HasEntityType(formulaRich.entities, EntityType::CustomEmoji));

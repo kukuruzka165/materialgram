@@ -48,6 +48,8 @@ Type TabIndexToType(int index) {
 
 tr::phrase<> SharedMediaTitle(Type type) {
 	switch (type) {
+	case Type::PhotoVideo:
+		return tr::lng_media_type_media;
 	case Type::Photo:
 		return tr::lng_media_type_photos;
 	case Type::GIF:
@@ -165,7 +167,9 @@ void Widget::selectionAction(SelectionAction action) {
 
 void Widget::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 	const auto type = controller()->section().mediaType();
-	if (type != Type::Photo && type != Type::Video) {
+	if (type != Type::Photo
+		&& type != Type::Video
+		&& type != Type::PhotoVideo) {
 		return;
 	}
 	if (_inner->canZoomIn()) {
@@ -184,8 +188,8 @@ void Widget::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 				controller()->session().data().history(
 					controller()->key().peer())),
 			.date = QDate::currentDate(),
-			.mediaPhoto = (type == Type::Photo),
-			.mediaVideo = (type == Type::Video),
+			.mediaPhoto = (type != Type::Video),
+			.mediaVideo = (type != Type::Photo),
 			.customJump = [=](FullMsgId id, Fn<void()> close) {
 				_inner->jumpToMessage(id.msg);
 				close();

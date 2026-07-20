@@ -95,6 +95,18 @@ struct NativeMessage {
 	return u"https://web.telegram.org:443/blank.html"_q;
 }
 
+// Loaded locally with ExternalShellTopUrl() as the base URI, so that
+// the shell document gets the web.telegram.org origin (required by
+// Mini Apps frame-ancestors) without any network requests, that may
+// fail in case web.telegram.org is not accessible from the network.
+[[nodiscard]] QString ExternalShellTopHtml() {
+	return u"<!DOCTYPE html><html><head></head><body></body></html>"_q;
+}
+
+void NavigateToExternalShellTop(not_null<Webview::Window*> window) {
+	window->loadHtml(ExternalShellTopHtml(), ExternalShellTopUrl());
+}
+
 [[nodiscard]] TextWithEntities WebviewErrorText(
 		const QString &text,
 		const Webview::Available &information) {
@@ -1564,7 +1576,7 @@ bool Panel::showWebview(Args &&args, const Webview::ThemeParams &params) {
 	const auto url = args.url;
 	if (_externalShell) {
 		_externalShellBootstrapped = false;
-		_webview->window.navigate(ExternalShellTopUrl());
+		NavigateToExternalShellTop(&_webview->window);
 	} else {
 		_webview->window.navigate(url);
 		_widget->setBackAllowed(allowBack);
@@ -1904,7 +1916,7 @@ void Panel::handleExternalShellMenuAction(const QString &id) {
 				}
 				showWebviewProgress();
 				updateThemeParams(params);
-				_webview->window.navigate(ExternalShellTopUrl());
+				NavigateToExternalShellTop(&_webview->window);
 			}
 		},
 		.terms = [=] {
@@ -2004,23 +2016,11 @@ Panel::ExternalShellAnchor Panel::externalShellAnchor() const {
 	}
 	auto popupAnchor = _webview->window.popupAnchor();
 	auto result = ExternalShellAnchor{
+		.anchorGeometry = std::move(popupAnchor.geometry),
 		.outerSize = std::move(popupAnchor.outerSize),
 		.transientParent = CompatibleForeignParent(
 			std::move(popupAnchor.transientParent)),
 	};
-	switch (result.transientParent.type) {
-	case Ui::Platform::ForeignParent::Type::X11:
-		result.anchorGeometry = Ui::Platform::ForeignWindowGeometry(
-			result.transientParent);
-		if (result.anchorGeometry) {
-			result.outerSize = std::nullopt;
-		}
-		break;
-	case Ui::Platform::ForeignParent::Type::None:
-	case Ui::Platform::ForeignParent::Type::Wayland:
-		result.anchorGeometry = std::move(popupAnchor.geometry);
-		break;
-	}
 	if (!result.transientParent
 		&& !result.anchorGeometry
 		&& !result.outerSize) {

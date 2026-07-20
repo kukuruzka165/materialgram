@@ -44,7 +44,8 @@ void SetupFlexibleRegularScroll(
 		Fn<void(int)> setScrollTopSkip,
 		Fn<void(int)> setInnerTopReserve,
 		Fn<void(QMargins)> setPaintPadding,
-		Fn<void(rpl::producer<not_null<QEvent*>>)> setViewport) {
+		Fn<void(rpl::producer<not_null<QEvent*>>)> setViewport,
+		bool abortSnapOnExternalScroll) {
 	const auto min = pinnedToTop->minimumHeight();
 	const auto max = pinnedToTop->maximumHeight();
 
@@ -66,6 +67,7 @@ void SetupFlexibleRegularScroll(
 		if (pinnedToTop->height() != height) {
 			pinnedToTop->resize(pinnedToTop->width(), height);
 		}
+		scroll->setVerticalBarTopSkip(height - min);
 	};
 	scroll->scrollTopValue(
 	) | rpl::on_next(applyTop, pinnedToTop->lifetime());
@@ -75,6 +77,7 @@ void SetupFlexibleRegularScroll(
 		Ui::Animations::Basic animation;
 		int fromTop = 0;
 		int targetTop = 0;
+		int lastApplied = -1;
 		crl::time startTime = 0;
 	};
 	const auto state = scroll->lifetime().make_state<State>();
@@ -86,16 +89,34 @@ void SetupFlexibleRegularScroll(
 		: st::infoProfileTopBarStep1;
 
 	state->animation.init([=](crl::time now) {
+		if (abortSnapOnExternalScroll
+			&& state->lastApplied >= 0
+			&& scroll->scrollTop() != state->lastApplied) {
+			state->animation.stop();
+			state->lastApplied = -1;
+			return;
+		}
 		const auto progress = std::clamp(
 			(now - state->startTime) / float64(kScrollStepTime),
 			0.,
 			1.);
-		scroll->scrollToY(anim::interpolate(
+		const auto value = anim::interpolate(
 			state->fromTop,
 			state->targetTop,
-			anim::easeOutQuint(1., progress)));
+			anim::easeOutQuint(1., progress));
+		scroll->scrollToY(value);
+		if (abortSnapOnExternalScroll) {
+			const auto actual = scroll->scrollTop();
+			if (actual != std::clamp(value, 0, scroll->scrollTopMax())) {
+				state->animation.stop();
+				state->lastApplied = -1;
+				return;
+			}
+			state->lastApplied = actual;
+		}
 		if (progress >= 1.) {
 			state->animation.stop();
+			state->lastApplied = -1;
 		}
 	});
 	scroll->setCustomWheelProcess([=](not_null<QWheelEvent*> e) {
@@ -123,6 +144,7 @@ void SetupFlexibleRegularScroll(
 		state->targetTop = std::clamp(anchor, 0, scroll->scrollTopMax());
 		state->fromTop = scroll->scrollTop();
 		state->startTime = crl::now();
+		state->lastApplied = -1;
 		if (!state->animation.animating()) {
 			state->animation.start();
 		}
@@ -136,13 +158,15 @@ FlexibleScrollHelper::FlexibleScrollHelper(
 	not_null<Ui::RpWidget*> pinnedToTop,
 	Fn<void(QMargins)> setPaintPadding,
 	Fn<void(rpl::producer<not_null<QEvent*>>&&)> setViewport,
-	FlexibleScrollData &data)
+	FlexibleScrollData &data,
+	bool abortSnapOnExternalScroll)
 : _scroll(scroll)
 , _inner(inner)
 , _pinnedToTop(pinnedToTop)
 , _setPaintPadding(setPaintPadding)
 , _setViewport(setViewport)
-, _data(data) {
+, _data(data)
+, _abortSnapOnExternalScroll(abortSnapOnExternalScroll) {
 	setupScrollAnimation();
 	setupScrollHandling();
 }
@@ -154,9 +178,16 @@ void FlexibleScrollHelper::setupScrollAnimation() {
 		_scrollTopTo = 0;
 		_timeOffset = 0;
 		_lastScrollApplied = 0;
+		_lastScrollSeen = -1;
 	};
 
 	_scrollAnimation.init([=](crl::time now) {
+		if (_abortSnapOnExternalScroll
+			&& _lastScrollSeen >= 0
+			&& _scroll->scrollTop() != _lastScrollSeen) {
+			clearScrollState();
+			return;
+		}
 		const auto progress = float64(now
 			- _scrollAnimation.started()
 			- _timeOffset) / kScrollStepTime;
@@ -166,6 +197,15 @@ void FlexibleScrollHelper::setupScrollAnimation() {
 			_scrollTopTo,
 			std::clamp(eased, 0., 1.));
 		scrollToY(scrollCurrent);
+		if (_abortSnapOnExternalScroll) {
+			const auto actual = _scroll->scrollTop();
+			if (actual
+				!= std::clamp(scrollCurrent, 0, _scroll->scrollTopMax())) {
+				clearScrollState();
+				return;
+			}
+			_lastScrollSeen = actual;
+		}
 		_lastScrollApplied = scrollCurrent;
 		if (progress >= 1) {
 			clearScrollState();
@@ -276,6 +316,7 @@ void FlexibleScrollHelper::setupScrollHandling() {
 		_scrollTopFrom = top;
 		if (!animationActive) {
 			_scrollTopTo = (nextStep != -1) ? nextStep : targetTop;
+			_lastScrollSeen = -1;
 			_scrollAnimation.start();
 		} else {
 			if (_scrollTopTo > _scrollTopFrom) {

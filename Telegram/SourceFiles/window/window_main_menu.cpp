@@ -829,10 +829,28 @@ void MainMenu::chooseEmojiStatus() {
 	if (_controller->showFrozenError()) {
 		return;
 	} else if (const auto widget = _badge->widget()) {
+		setupEmojiStatusDismiss();
 		_emojiStatusPanel->show(_controller, widget, _badge->sizeTag());
 	} else {
 		ShowPremiumPreviewBox(_controller, PremiumFeature::EmojiStatus);
 	}
+}
+
+void MainMenu::setupEmojiStatusDismiss() {
+	if (_emojiStatusDismissSetup) {
+		return;
+	}
+	_emojiStatusDismissSetup = true;
+
+	base::install_event_filter(this, parentWidget(), [=](
+			not_null<QEvent*> e) {
+		if (e->type() != QEvent::MouseButtonPress
+			|| !_emojiStatusPanel->shown()) {
+			return base::EventFilterResult::Continue;
+		}
+		_emojiStatusPanel->hideAnimated();
+		return base::EventFilterResult::Cancel;
+	});
 }
 
 bool MainMenu::eventHook(QEvent *event) {
@@ -844,6 +862,10 @@ bool MainMenu::eventHook(QEvent *event) {
 		QGuiApplication::sendEvent(_inner, event);
 	}
 	return RpWidget::eventHook(event);
+}
+
+void MainMenu::hideEvent(QHideEvent *e) {
+	_emojiStatusPanel->hideFast();
 }
 
 void MainMenu::paintEvent(QPaintEvent *e) {

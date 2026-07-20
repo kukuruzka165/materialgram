@@ -56,6 +56,10 @@ settingsOptionDisabled: SettingsButton(settingsButtonNoIcon) {
 	textBgOver: windowBg;
 	toggleOver: infoProfileToggle;
 }
+settingsButtonDisabledWithIcon: SettingsButton(settingsButton) {
+	textFg: windowSubTextFg;
+	textFgOver: windowSubTextFg;
+}
 settingsButtonRightSkip: 23px;
 settingsScalePadding: margins(60px, 7px, 22px, 4px);
 settingsBigScalePadding: margins(21px, 7px, 21px, 4px);
@@ -112,6 +116,7 @@ settingsPremiumIconAiCompose: icon{
 	{ "chat/ai_star1-20x20", windowFgActive, point(2px, 2px) },
 	{ "chat/ai_star2-20x20", windowFgActive, point(2px, 2px) },
 };
+settingsPremiumIconRich: icon {{ "settings/premium/rich", settingsIconFg }};
 
 settingsIconChatAutomation: icon {
 	{ size(24px, 24px), transparent },
@@ -284,6 +289,7 @@ settingsThemeBubbleRadius: 2px;
 settingsThemeBubblePosition: point(6px, 8px);
 settingsThemeBubbleSkip: 6px;
 settingsThemeRadioBottom: 12px;
+settingsThemeOutlineWidth: 2px;
 settingsThemeMinSkip: 4px;
 
 settingsThemeNotSupportedBg: windowBgOver;

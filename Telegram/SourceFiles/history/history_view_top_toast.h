@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "base/weak_ptr.h"
 
+#include <rpl/producer.h>
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -44,7 +46,8 @@ private:
 class AnchoredTooltip final {
 public:
 	void show(
-		not_null<Ui::ScrollArea*> scroll,
+		not_null<QWidget*> scroll,
+		rpl::producer<> scrolls,
 		QRect globalArea,
 		TextWithEntities text);
 	void hide();

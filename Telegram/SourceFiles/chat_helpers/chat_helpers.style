@@ -845,6 +845,9 @@ mentionFg: windowSubTextFg;
 mentionFgOver: windowSubTextFgOver;
 mentionFgActive: windowActiveTextFg;
 mentionFgOverActive: windowActiveTextFg;
+mentionEphemeralIcon: icon {{ "chat/ephemeral_badge", mentionFg }};
+mentionEphemeralIconOver: icon {{ "chat/ephemeral_badge", mentionFgOver }};
+mentionEphemeralIconSkip: 5px;
 
 autocompleteSearchPadding: margins(16px, 5px, 16px, 5px);
 autocompleteRowPadding: margins(16px, 5px, 16px, 5px);
@@ -1171,7 +1174,7 @@ historyPullNextInset: 16px;
 historyPullNextPadding: 4px;
 historyPullNextArrowSize: 24px;
 historyPullNextArrowRaise: 20px;
-historyPullNextRise: 36px;
+historyPullNextRise: 35px;
 historyPullNextNameTop: 20px;
 historyPullNextNameRadius: 15px;
 historyPullNextHintSlide: 10px;
@@ -1248,6 +1251,7 @@ historyComposeField: InputField(defaultInputField) {
 	duration: 100;
 }
 historyComposeFieldMaxHeight: 224px;
+historyRichMessagePreviewHeight: 72px;
 historyComposeFieldFadeHeight: 6px;
 historySendRight: 2px;
 historySendPadding: 9px;
@@ -1518,6 +1522,10 @@ historyAiComposeButtonPosition: point(-8px, -4px);
 historySendAsFileButton: IconButton(historyAiComposeButton) {
 	icon: icon {{ "chat/text_to_file-18x18", historyComposeIconFg }};
 	iconOver: icon {{ "chat/text_to_file-18x18", historyComposeIconFgOver }};
+}
+historyExpandComposeButton: IconButton(historyAiComposeButton) {
+	icon: icon {{ "menu/rich/expand-20x20", historyComposeIconFg }};
+	iconOver: icon {{ "menu/rich/expand-20x20", historyComposeIconFgOver }};
 }
 historyAiComposeTooltipSkip: 8px;
 importantTooltipHide: IconButton(defaultIconButton) {

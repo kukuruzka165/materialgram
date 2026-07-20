@@ -63,6 +63,21 @@ defaultSubTabs: SubTabs {
 	bg: windowBg;
 }
 
+ProfileTabsStrip {
+	height: pixels;
+	margin: margins;
+	skip: pixels;
+	tabPadding: margins;
+	activeSkip: pixels;
+	style: TextStyle;
+	fg: color;
+	fgActive: color;
+	bg: color;
+	bgActive: color;
+	ripple: RippleAnimation;
+	duration: int;
+}
+
 infoMediaHeaderFg: windowFg;
 
 infoMediaSearch: SearchFieldRow {
@@ -387,6 +402,38 @@ infoTopBarBlackClose: IconButton(infoTopBarClose) {
 	iconOver: icon {{ "info/info_close", windowBoldFg }};
 	ripple: universalRippleAnimation;
 }
+infoTopBarColoredMenu: IconButton(infoTopBarMenu) {
+	icon: icon {{ "title_menu_dots", groupCallMembersFg }};
+	iconOver: icon {{ "title_menu_dots", groupCallMembersFg }};
+	ripple: universalRippleAnimation;
+}
+infoTopBarBlackMenu: IconButton(infoTopBarMenu) {
+	icon: icon {{ "title_menu_dots", windowBoldFg }};
+	iconOver: icon {{ "title_menu_dots", windowBoldFg }};
+	ripple: universalRippleAnimation;
+}
+infoTopBarColoredSearch: IconButton(infoTopBarSearch) {
+	icon: icon {{ "top_bar_search", groupCallMembersFg }};
+	iconOver: icon {{ "top_bar_search", groupCallMembersFg }};
+	ripple: universalRippleAnimation;
+}
+infoTopBarBlackSearch: IconButton(infoTopBarSearch) {
+	icon: icon {{ "top_bar_search", windowBoldFg }};
+	iconOver: icon {{ "top_bar_search", windowBoldFg }};
+	ripple: universalRippleAnimation;
+}
+infoTopBarColoredGroup: IconButton(infoTopBarSearch) {
+	icon: icon {{ "menu/admin", groupCallMembersFg }};
+	iconOver: icon {{ "menu/admin", groupCallMembersFg }};
+	iconPosition: point(15px, -1px);
+	ripple: universalRippleAnimation;
+}
+infoTopBarBlackGroup: IconButton(infoTopBarSearch) {
+	icon: icon {{ "menu/admin", windowBoldFg }};
+	iconOver: icon {{ "menu/admin", windowBoldFg }};
+	iconPosition: point(15px, -1px);
+	ripple: universalRippleAnimation;
+}
 infoTopBarBlackEdit: IconButton(infoTopBarEdit) {
 	icon: icon {{ "menu/edit", windowBoldFg }};
 	iconOver: icon {{ "menu/edit", windowBoldFg }};
@@ -454,6 +501,7 @@ infoProfileTopBarActionReport: icon{{ "profile/report-23x23", windowBoldFg }};
 infoProfileTopBarActionLeave: icon{{ "profile/leave-23x23", windowBoldFg }};
 infoProfileTopBarActionMore: icon{{ "profile/profile_more", windowBoldFg }};
 infoProfileTopBarActionManage: icon{{ "profile/profile_manage", windowBoldFg }};
+infoProfileTopBarActionSearch: icon{{ "menu/search", windowBoldFg }};
 infoProfileTopBarActionLiveStream: icon{{ "profile/live_stream-23x23", windowBoldFg }};
 
 infoProfileTopBarTopicStatusButton: RoundButton(defaultTableSmallButton) {
@@ -522,6 +570,12 @@ infoProfileStatus: FlatLabel(defaultFlatLabel) {
 	maxHeight: 18px;
 	textFg: windowSubTextFg;
 }
+infoStatusHiddenIcon: IconEmoji {
+	icon: icon{{ "community/requests_hidden", windowSubTextFg }};
+	padding: margins(0px, 4px, 0px, 0px);
+	useIconColor: false;
+}
+infoStatusHiddenToastIcon: icon{{ "community/requests_hidden", toastFg }};
 infoProfileCover: InfoProfileCover {
 	height: 108px;
 	photo: UserpicButton(defaultUserpicButton) {
@@ -678,6 +732,13 @@ infoOpenApp: RoundButton(defaultActiveButton) {
 	height: 40px;
 }
 infoOpenAppMargin: margins(16px, 12px, 16px, 12px);
+communityAddChatButton: RoundButton(infoOpenApp) {
+	icon: icon{{ "settings/plus", activeButtonFg }};
+	iconOver: icon{{ "settings/plus", activeButtonFgOver }};
+	iconPosition: point(-10px, 8px);
+}
+communityAddChatButtonMargin: margins(16px, 12px, 16px, 12px);
+communityAddChatNarrowAddedWidth: 10px;
 
 infoPersonalChannelIconPosition: point(25px, 12px);
 infoPersonalChannelNameLabel: FlatLabel(infoProfileStatus) {
@@ -817,7 +878,39 @@ infoMediaSkip: 2px;
 infoMediaLeft: 3px;
 infoMediaMargin: margins(0px, 6px, 0px, 2px);
 infoMediaMinGridSize: 82px;
+infoMediaSkeletonMinHeight: 240px;
+infoMediaSkeletonRowHeight: 64px;
+infoMediaSkeletonRowPadding: 12px;
+infoMediaSkeletonBarHeight: 10px;
+infoMediaSkeletonFileThumb: 46px;
+infoMediaSkeletonLinkRow: 56px;
+infoMediaSkeletonLinkThumb: 32px;
+infoMediaSkeletonSoundSize: 42px;
+infoMediaTabsRightSkip: 13px;
 infoMediaGridSizeStep: 16px;
+infoMediaTabsMinBodyWidth: infoMediaMinGridSize + infoMediaSkip + infoMediaSkip + infoMediaTabsRightSkip;
+
+infoProfileTabsStrip: ProfileTabsStrip {
+	height: 48px;
+	margin: margins(8px, 6px, 8px, 6px);
+	skip: 0px;
+	tabPadding: margins(16px, 0px, 16px, 0px);
+	activeSkip: 4px;
+	style: semiboldTextStyle;
+	fg: windowSubTextFg;
+	fgActive: lightButtonFg;
+	bg: windowBg;
+	bgActive: lightButtonBgOver;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: lightButtonBgRipple;
+	}
+	duration: 200;
+}
+infoProfileTabsShadow: BoxShadow {
+	blurRadius: 8px;
+	offset: point(0px, 2px);
+	opacity: 0.18;
+}
 
 infoCommonGroupsMargin: margins(0px, 2px, 0px, 2px);
 infoCommonGroupsListItem: PeerListItem(defaultPeerListItem) {
@@ -895,6 +988,13 @@ manageGroupNoIconButton: SettingsCountButton(manageGroupTopButtonWithText) {
 
 manageDeleteGroupButton: SettingsCountButton(manageGroupNoIconButton) {
 	button: SettingsButton(manageGroupNoIconButtonInner) {
+		textFg: attentionButtonFg;
+		textFgOver: attentionButtonFg;
+	}
+}
+
+manageGroupAttentionButton: SettingsCountButton(manageGroupButton) {
+	button: SettingsButton(manageGroupButtonInner) {
 		textFg: attentionButtonFg;
 		textFgOver: attentionButtonFg;
 	}

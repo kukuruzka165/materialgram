@@ -210,7 +210,6 @@ peerListBox: PeerList(defaultPeerList) {
 	item: peerListBoxItem;
 }
 
-localStorageRowHeight: 50px;
 localStorageRowTitle: FlatLabel(defaultFlatLabel) {
 	textFg: windowBoldFg;
 	maxHeight: 20px;
@@ -225,7 +224,6 @@ localStorageRowSize: FlatLabel(defaultFlatLabel) {
 		font: font(14px);
 	}
 }
-localStorageClear: defaultBoxButton;
 localStorageLimitLabel: LabelSimple(defaultLabelSimple) {
 	font: boxTextFont;
 }
@@ -245,7 +243,6 @@ localStorageChartThicknessThin: 12px;
 localStorageChartSelectGrow: 9px;
 localStorageChartSizeFont: font(32px semibold);
 localStorageChartUnitFont: font(13px);
-localStorageChartLabelFont: font(13px);
 localStorageChartPercentFont: font(15px semibold);
 localStorageChartParticle: 15px;
 localStorageCompleteStar1: 18px;
@@ -316,11 +313,6 @@ localStorageUsageSubtitle: FlatLabel(defaultFlatLabel) {
 	}
 }
 
-localStorageClearingSpinner: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
-	color: activeButtonBg;
-	thickness: 3px;
-	size: size(48px, 48px);
-}
 localStorageClearingSpinnerPadding: margins(0px, 20px, 0px, 14px);
 
 shareRowsTop: 12px;
@@ -544,6 +536,7 @@ defaultCalendarSizes: CalendarSizes {
 	padding: margins(14px, 0px, 14px, 0px);
 }
 calendarDaysFont: normalFont;
+calendarDaysFontOver: semiboldFont;
 calendarDaysFg: boxTitleAdditionalFg;
 calendarScroll: ScrollArea(defaultSolidScroll) {
 	deltat: 3px;
@@ -789,6 +782,8 @@ proxyApplyBox: Box(defaultBox) {
 }
 
 markdownLinkFieldPadding: margins(22px, 0px, 22px, 10px);
+markdownMathCheckboxMargin: margins(22px, 12px, 22px, 10px);
+markdownMathFieldMaxHeight: 140px;
 
 termsContent: FlatLabel(defaultFlatLabel) {
 	minWidth: 285px;
@@ -953,6 +948,7 @@ inviteViaLinkButton: SettingsButton(defaultSettingsButton) {
 }
 inviteViaLinkIcon: icon {{ "info/edit/group_manage_links", lightButtonFg }};
 inviteViaLinkIconPosition: point(23px, 2px);
+communityEditAddChatIconPosition: point(25px, 16px);
 peerListWithInviteViaLink: PeerList(peerListBox) {
 	padding: margins(
 		0px,
@@ -1064,20 +1060,6 @@ requestPeerRestriction: FlatLabel(defaultFlatLabel) {
 	}
 }
 
-requestsBoxItem: PeerListItem(peerListBoxItem) {
-	height: 99px;
-	button: OutlineButton(defaultPeerListButton) {
-		textBg: contactsBg;
-		textBgOver: contactsBg;
-		ripple: RippleAnimation(defaultRippleAnimation) {
-			color: contactsBgOver;
-		}
-	}
-}
-requestsBoxList: PeerList(peerListBox) {
-	padding: margins(0px, 12px, 0px, 12px);
-	item: requestsBoxItem;
-}
 contactsWithStories: PeerList(peerListBox) {
 	padding: margins(0px, 0px, 0px, 0px);
 	item: PeerListItem(peerListBoxItem) {
@@ -1097,17 +1079,67 @@ contactsWithStories: PeerList(peerListBox) {
 	}
 }
 requestsAcceptButton: RoundButton(defaultActiveButton) {
-	width: -28px;
-	height: 30px;
-	textTop: 6px;
+	width: -32px;
+	height: 28px;
+	textTop: 5px;
 }
-requestsRejectButton: RoundButton(defaultLightButton) {
-	width: -28px;
-	height: 30px;
-	textTop: 6px;
+requestsRejectButton: RoundButton(defaultBoxButton) {
+	width: -32px;
+	height: 28px;
+	textTop: 5px;
+	style: semiboldTextStyle;
 }
-requestAcceptPosition: point(71px, 58px);
 requestButtonsSkip: 9px;
+communityRequestsBoxItem: PeerListItem(peerListBoxItem) {
+	height: 89px;
+	button: OutlineButton(defaultPeerListButton) {
+		textBg: contactsBg;
+		textBgOver: contactsBg;
+		ripple: RippleAnimation(defaultRippleAnimation) {
+			color: contactsBgOver;
+		}
+	}
+}
+communityRequestsBoxList: PeerList(peerListBox) {
+	padding: margins(0px, 6px, 0px, 12px);
+	item: communityRequestsBoxItem;
+}
+communityRequestAcceptPosition: point(71px, 56px);
+communityRequestsTitlePadding: margins(0px, 8px, 0px, -4px);
+requestSuggestStyle: TextStyle(defaultTextStyle) {
+	font: contactsStatusFont;
+}
+requestSuggestPosition: point(74px, 30px);
+requestSuggestBadgeSize: 16px;
+requestSuggestBadgeBorder: 1px;
+requestSuggestBadgeSkip: point(-4px, 2px);
+requestMembersStyle: TextStyle(defaultTextStyle) {
+	font: font(11px);
+}
+requestMembersTop: 11px;
+requestMembersRightSkip: 14px;
+requestMembersPadding: margins(5px, 0px, 5px, 1px);
+requestMembersIcon: IconEmoji {
+	icon: icon{{ "community/requests_members", contactsStatusFg }};
+	padding: margins(0px, 4px, 4px, 0px);
+	useIconColor: false;
+}
+requestPillsSkip: 5px;
+requestHiddenIcon: IconEmoji {
+	icon: icon{{ "community/requests_hidden", contactsStatusFg }};
+	padding: margins(0px, 4px, 0px, 0px);
+	useIconColor: false;
+}
+messageOwnerInfoSkip: 12px;
+requestsSectionBottomMargin: margins(12px, 10px, 12px, 10px);
+requestsAddAllButton: RoundButton(defaultActiveButton) {
+	height: 32px;
+	textTop: 7px;
+}
+requestsDeclineAllButton: RoundButton(defaultLightButton) {
+	height: 32px;
+	textTop: 7px;
+}
 
 ringtonesBoxButton: SettingsButton(defaultSettingsButton) {
 	textFg: lightButtonFg;
@@ -1557,3 +1589,10 @@ aiComposeBoxInfoButton: IconButton(boxTitleClose) {
 	ripple: defaultRippleAnimation;
 }
 aiComposeShadowOpacity: 0.3;
+
+createAiSelectorArrowsIcon: icon{{ "arrows_select", windowSubTextFg }};
+
+communityBoxManage: IconButton(boxTitleClose) {
+	icon: icon {{ "menu/manage", boxTitleCloseFg }};
+	iconOver: icon {{ "menu/manage", boxTitleCloseFgOver }};
+}

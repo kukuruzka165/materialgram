@@ -523,10 +523,7 @@ not_null<Ui::SettingsButton*> Search::createEntryButton(
 }
 
 void Search::rebuildResults(const QString &query) {
-	for (auto i = 0, count = _list->count(); i != count; ++i) {
-		_list->widgetAt(i)->hide();
-	}
-	_list->clear();
+	_list->detachRows();
 	clearSelection();
 	_visibleButtons.clear();
 

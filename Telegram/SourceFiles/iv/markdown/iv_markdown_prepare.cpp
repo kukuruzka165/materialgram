@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_prepare_native_blocks.h"
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
 #include "iv/markdown/iv_markdown_prepare_state.h"
+#include "lang/lang_keys.h"
 
 #include <QtCore/QElapsedTimer>
 
@@ -119,6 +120,18 @@ auto PrepareMarkdownTableRenderLimitsForIv()
 	return PrepareLimitsForIv().markdownTableRender;
 }
 
+QString HeadingLevelLabel(int level) {
+	switch (std::clamp(level, 1, 6)) {
+	case 1: return tr::lng_article_insert_heading1(tr::now);
+	case 2: return tr::lng_article_insert_heading2(tr::now);
+	case 3: return tr::lng_article_insert_heading3(tr::now);
+	case 4: return tr::lng_article_insert_heading4(tr::now);
+	case 5: return tr::lng_article_insert_heading5(tr::now);
+	case 6: return tr::lng_article_insert_heading6(tr::now);
+	}
+	return tr::lng_article_insert_heading1(tr::now);
+}
+
 MarkdownArticleContent PrepareSynchronously(PrepareRequest request) {
 	auto state = PrepareState();
 	auto timer = QElapsedTimer();
@@ -170,6 +183,7 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	timer.start();
 	state.result.mediaRuntime = std::move(request.mediaRuntime);
 	state.result.editMode = request.editMode;
+	state.result.richPage = request.richPage;
 	state.dimensions = request.dimensionsOverride.value_or(
 		CaptureMarkdownPrepareDimensions());
 	state.tableRenderLimits = request.tableRenderLimits.value_or(

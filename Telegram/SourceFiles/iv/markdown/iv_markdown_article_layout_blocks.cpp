@@ -30,6 +30,13 @@ constexpr auto kIvMarkedTextOptions = TextParseOptions{
 	Qt::LayoutDirectionAuto,
 };
 
+constexpr auto kIvMarkedTextOptionsRtl = TextParseOptions{
+	TextParseMultiline,
+	0,
+	0,
+	Qt::RightToLeft,
+};
+
 constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
 constexpr auto kReadableTextColumns = 12;
@@ -157,28 +164,33 @@ void SetPlainTextLeaf(
 	Ui::Text::String *leaf,
 	const style::TextStyle &textStyle,
 	const QString &text,
-	int minResizeWidth);
+	int minResizeWidth,
+	bool rtl);
 
 [[nodiscard]] CachedTextLeafSourceSignature MarkedTextLeafSourceSignature(
 		TextWithEntities text,
 		const style::TextStyle &textStyle,
-		int minResizeWidth) {
+		int minResizeWidth,
+		bool rtl) {
 	auto result = CachedTextLeafSourceSignature();
 	result.dependsOnMediaRuntime = TextDependsOnMediaRuntime(text);
 	result.text = std::move(text);
 	result.minResizeWidth = minResizeWidth;
 	result.styleKey = TextStyleKey(textStyle);
+	result.rtl = rtl;
 	return result;
 }
 
 [[nodiscard]] CachedTextLeafSourceSignature PlainTextLeafSourceSignature(
 		const QString &text,
 		const style::TextStyle &textStyle,
-		int minResizeWidth) {
+		int minResizeWidth,
+		bool rtl) {
 	return MarkedTextLeafSourceSignature(
 		TextWithEntities::Simple(text),
 		textStyle,
-		minResizeWidth);
+		minResizeWidth,
+		rtl);
 }
 
 [[nodiscard]] CachedTextLeafSourceSignature CodeTextLeafSourceSignature(
@@ -187,7 +199,8 @@ void SetPlainTextLeaf(
 	auto result = MarkedTextLeafSourceSignature(
 		CodeBlockDisplayText(prepared.text),
 		st.code,
-		CodeTextMinResizeWidth(st));
+		CodeTextMinResizeWidth(st),
+		false);
 	result.codeLanguage = prepared.codeLanguage;
 	return result;
 }
@@ -337,7 +350,11 @@ void BuildOrReuseCachedTextLeaf(
 			context.preparedPath,
 			tableRowIndex,
 			tableCellIndex),
-		MarkedTextLeafSourceSignature(prepared.text, textStyle, minResizeWidth),
+		MarkedTextLeafSourceSignature(
+			prepared.text,
+			textStyle,
+			minResizeWidth,
+			context.rtl),
 		[&](Ui::Text::String *leaf,
 				Spellchecker::HighlightProcessId*) {
 			SetTextLeaf(
@@ -349,6 +366,7 @@ void BuildOrReuseCachedTextLeaf(
 				inlineFormulaObjects,
 				mediaRuntime,
 				minResizeWidth,
+				context.rtl,
 				context.repaint,
 				context.repaintRect);
 			BindLinks(leaf, prepared.links);
@@ -371,14 +389,16 @@ void BuildOrReuseCachedTextLeaf(
 			PlainTextLeafSourceSignature(
 				result.placeholderText,
 				textStyle,
-				minResizeWidth),
+				minResizeWidth,
+				context.rtl),
 			[&](Ui::Text::String *leaf,
 					Spellchecker::HighlightProcessId*) {
 				SetPlainTextLeaf(
 					leaf,
 					textStyle,
 					result.placeholderText,
-					minResizeWidth);
+					minResizeWidth,
+					context.rtl);
 			});
 	}
 	return result;
@@ -608,16 +628,31 @@ struct TableSpannedCellGeometryData {
 	return result;
 }
 
+void SetSimpleMarkedTextLeaf(
+		Ui::Text::String *leaf,
+		const style::TextStyle &textStyle,
+		const TextWithEntities &text,
+		int minResizeWidth,
+		bool rtl) {
+	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
+	leaf->setMarkedText(
+		textStyle,
+		text,
+		rtl ? kIvMarkedTextOptionsRtl : kIvMarkedTextOptions);
+}
+
 void SetPlainTextLeaf(
 		Ui::Text::String *leaf,
 		const style::TextStyle &textStyle,
 		const QString &text,
-		int minResizeWidth) {
-	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
-	leaf->setMarkedText(
+		int minResizeWidth,
+		bool rtl) {
+	SetSimpleMarkedTextLeaf(
+		leaf,
 		textStyle,
 		TextWithEntities::Simple(text),
-		kIvMarkedTextOptions);
+		minResizeWidth,
+		rtl);
 }
 
 void PopulateCodeBlockLeaf(
@@ -669,6 +704,7 @@ void PopulateCodeBlockLeaf(
 		inlineFormulaObjects,
 		mediaRuntime,
 		CodeTextMinResizeWidth(st),
+		false,
 		std::move(repaint),
 		std::move(repaintRect),
 		std::move(spoilerLinkFilter));
@@ -683,7 +719,7 @@ void PopulateCodeBlockLeaf(
 		const style::TextStyle &textStyle,
 		int width) {
 	return std::max(
-		leaf.countHeight(width, true),
+		leaf.countHeight(width),
 		TextLineHeight(textStyle));
 }
 
@@ -726,8 +762,9 @@ void PopulateCodeBlockLeaf(
 [[nodiscard]] int LimitedMediaWidth(
 		int availableWidth,
 		int intrinsicWidth) {
-	const auto limit = (intrinsicWidth > 0)
-		? (2 * intrinsicWidth)
+	const auto scaledIntrinsic = style::ConvertScale(intrinsicWidth);
+	const auto limit = (scaledIntrinsic > 0)
+		? (2 * scaledIntrinsic)
 		: availableWidth;
 	return std::clamp(limit, 1, std::max(availableWidth, 1));
 }
@@ -735,10 +772,12 @@ void PopulateCodeBlockLeaf(
 void ApplyMediaBlockGeometry(
 		LaidOutBlock *block,
 		QRect geometry,
-		const style::Markdown &st) {
+		const style::Markdown &st,
+		double mediaPixelScale) {
 	if (!block->mediaBlock) {
 		return;
 	}
+	block->mediaBlock->setMediaPixelScale(mediaPixelScale);
 	block->mediaBlock->setGeometry(geometry);
 	auto actual = block->mediaBlock->geometry();
 	if (actual.width() < geometry.width() && actual.x() == geometry.x()) {
@@ -888,22 +927,6 @@ void ResetTableRowGeometry(LaidOutTableRow *row) {
 	}
 }
 
-[[nodiscard]] bool TextNeedsRetainedLeaf(const QString &text) {
-	for (const auto ch : text) {
-		if (!Ui::Text::IsTrimmed(ch)
-			&& !Ui::Text::IsReplacedBySpace(ch)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-[[nodiscard]] bool MissingRetainedLeaf(
-		const QString &text,
-		const Ui::Text::String &leaf) {
-	return TextNeedsRetainedLeaf(text) && leaf.isEmpty();
-}
-
 [[nodiscard]] bool MissingRetainedPlaceholderLeaf(
 		bool usePlaceholder,
 		const Ui::Text::String &leaf) {
@@ -950,7 +973,8 @@ void CopyBlockCachedTextLeafs(
 		LaidOutBlock &block,
 		const style::Markdown &st,
 		CachedTextLeafPool *pool,
-		const std::vector<int> &preparedPath) {
+		const std::vector<int> &preparedPath,
+		bool rtl) {
 	const auto copyBlockLeaf = [&](CachedTextLeafSlot slot,
 			CachedTextLeafSourceSignature source,
 			Ui::Text::String *leaf,
@@ -987,7 +1011,8 @@ void CopyBlockCachedTextLeafs(
 			PlainTextLeafSourceSignature(
 				ListMarkerText(prepared),
 				st.body,
-				PlainTextMinResizeWidth(st.body)),
+				PlainTextMinResizeWidth(st.body),
+				false),
 			&block.marker);
 	}
 
@@ -996,19 +1021,26 @@ void CopyBlockCachedTextLeafs(
 	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading: {
 		const auto &textStyle = TextStyleFor(prepared, st);
+		const auto &placeholderStyle = EditPlaceholderTextStyleFor(
+			prepared,
+			st);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Leaf,
 			MarkedTextLeafSourceSignature(
 				prepared.text,
 				textStyle,
-				FlowBlockMinimumWidth(prepared, st)),
+				FlowBlockMinimumWidth(prepared, st),
+				rtl),
 			&block.leaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Placeholder,
-			PlainTextLeafSourceSignature(
-				prepared.editPlaceholderText,
-				textStyle,
-				PlainTextMinResizeWidth(textStyle)),
+			MarkedTextLeafSourceSignature(
+				EditPlaceholderTextValue(
+					prepared,
+					prepared.editPlaceholderText),
+				placeholderStyle,
+				PlainTextMinResizeWidth(placeholderStyle),
+				rtl),
 			&block.placeholderLeaf);
 	} break;
 	case PreparedBlockKind::CodeBlock:
@@ -1022,7 +1054,8 @@ void CopyBlockCachedTextLeafs(
 			PlainTextLeafSourceSignature(
 				prepared.editPlaceholderText,
 				st.code,
-				PlainTextMinResizeWidth(st.code)),
+				PlainTextMinResizeWidth(st.code),
+				rtl),
 			&block.placeholderLeaf);
 		break;
 	case PreparedBlockKind::DisplayMath:
@@ -1031,14 +1064,16 @@ void CopyBlockCachedTextLeafs(
 			PlainTextLeafSourceSignature(
 				prepared.editPlaceholderText,
 				st.displayMath.fallbackStyle,
-				DisplayMathFallbackTextMinResizeWidth(st)),
+				DisplayMathFallbackTextMinResizeWidth(st),
+				rtl),
 				&block.placeholderLeaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Fallback,
 			MarkedTextLeafSourceSignature(
 				DisplayMathFallbackText(),
 				st.displayMath.fallbackStyle,
-				DisplayMathFallbackTextMinResizeWidth(st)),
+				DisplayMathFallbackTextMinResizeWidth(st),
+				false),
 			&block.fallbackLeaf);
 		break;
 	case PreparedBlockKind::Table: {
@@ -1047,14 +1082,16 @@ void CopyBlockCachedTextLeafs(
 			MarkedTextLeafSourceSignature(
 				prepared.text,
 				st.body,
-				FlowTextMinResizeWidth(st.body)),
+				FlowTextMinResizeWidth(st.body),
+				rtl),
 			&block.leaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Placeholder,
 			PlainTextLeafSourceSignature(
 				prepared.editPlaceholderText,
 				st.body,
-				PlainTextMinResizeWidth(st.body)),
+				PlainTextMinResizeWidth(st.body),
+				rtl),
 			&block.placeholderLeaf);
 		const auto rowCount = std::min(
 			int(prepared.tableRows.size()),
@@ -1080,7 +1117,8 @@ void CopyBlockCachedTextLeafs(
 					MarkedTextLeafSourceSignature(
 						preparedCell.text,
 						textStyle,
-						minResizeWidth),
+						minResizeWidth,
+						rtl),
 					&cell.leaf);
 				copyTableCellLeaf(
 					CachedTextLeafSlot::TableCellPlaceholder,
@@ -1090,7 +1128,8 @@ void CopyBlockCachedTextLeafs(
 					PlainTextLeafSourceSignature(
 						preparedCell.editPlaceholderText,
 						textStyle,
-						minResizeWidth),
+						minResizeWidth,
+						rtl),
 					&cell.placeholderLeaf);
 			}
 		}
@@ -1101,21 +1140,24 @@ void CopyBlockCachedTextLeafs(
 			MarkedTextLeafSourceSignature(
 				prepared.text,
 				st.details.summaryStyle,
-				FlowTextMinResizeWidth(st.details.summaryStyle)),
+				FlowTextMinResizeWidth(st.details.summaryStyle),
+				rtl),
 			&block.leaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Placeholder,
 			PlainTextLeafSourceSignature(
 				prepared.editPlaceholderText,
 				st.details.summaryStyle,
-				PlainTextMinResizeWidth(st.details.summaryStyle)),
+				PlainTextMinResizeWidth(st.details.summaryStyle),
+				rtl),
 			&block.placeholderLeaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Action,
 			PlainTextLeafSourceSignature(
 				DetailsStateText(prepared.detailsOpen),
 				st.details.summaryStyle,
-				PlainTextMinResizeWidth(st.details.summaryStyle)),
+				PlainTextMinResizeWidth(st.details.summaryStyle),
+				false),
 			&block.actionLeaf);
 		break;
 	case PreparedBlockKind::Placeholder:
@@ -1124,21 +1166,24 @@ void CopyBlockCachedTextLeafs(
 			PlainTextLeafSourceSignature(
 				prepared.placeholder.label,
 				st.placeholder.labelStyle,
-				PlainTextMinResizeWidth(st.placeholder.labelStyle)),
+				PlainTextMinResizeWidth(st.placeholder.labelStyle),
+				rtl),
 			&block.labelLeaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Leaf,
 			MarkedTextLeafSourceSignature(
 				prepared.text,
 				st.body,
-				FlowTextMinResizeWidth(st.body)),
+				FlowTextMinResizeWidth(st.body),
+				rtl),
 			&block.leaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Placeholder,
 			PlainTextLeafSourceSignature(
 				prepared.editPlaceholderText,
 				st.body,
-				PlainTextMinResizeWidth(st.body)),
+				PlainTextMinResizeWidth(st.body),
+				rtl),
 			&block.placeholderLeaf);
 		break;
 	case PreparedBlockKind::RelatedArticle:
@@ -1147,21 +1192,24 @@ void CopyBlockCachedTextLeafs(
 			PlainTextLeafSourceSignature(
 				prepared.relatedArticle.title,
 				st.relatedArticle.titleStyle,
-				PlainTextMinResizeWidth(st.relatedArticle.titleStyle)),
+				PlainTextMinResizeWidth(st.relatedArticle.titleStyle),
+				rtl),
 				&block.labelLeaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Subtitle,
 			PlainTextLeafSourceSignature(
 				prepared.relatedArticle.description,
 				st.relatedArticle.subtitleStyle,
-				PlainTextMinResizeWidth(st.relatedArticle.subtitleStyle)),
+				PlainTextMinResizeWidth(st.relatedArticle.subtitleStyle),
+				rtl),
 				&block.subtitleLeaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Action,
 			PlainTextLeafSourceSignature(
 				prepared.relatedArticle.footer,
 				st.relatedArticle.footerStyle,
-				PlainTextMinResizeWidth(st.relatedArticle.footerStyle)),
+				PlainTextMinResizeWidth(st.relatedArticle.footerStyle),
+				rtl),
 			&block.actionLeaf);
 		break;
 	case PreparedBlockKind::EmbedPost:
@@ -1170,28 +1218,32 @@ void CopyBlockCachedTextLeafs(
 			PlainTextLeafSourceSignature(
 				prepared.embedPost.author,
 				st.embedPost.authorStyle,
-				PlainTextMinResizeWidth(st.embedPost.authorStyle)),
+				PlainTextMinResizeWidth(st.embedPost.authorStyle),
+				rtl),
 			&block.labelLeaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Subtitle,
 			PlainTextLeafSourceSignature(
 				prepared.embedPost.dateText,
 				st.embedPost.dateStyle,
-				PlainTextMinResizeWidth(st.embedPost.dateStyle)),
+				PlainTextMinResizeWidth(st.embedPost.dateStyle),
+				rtl),
 			&block.subtitleLeaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Leaf,
 			MarkedTextLeafSourceSignature(
 				prepared.text,
 				st.body,
-				FlowTextMinResizeWidth(st.body)),
+				FlowTextMinResizeWidth(st.body),
+				rtl),
 			&block.leaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Placeholder,
 			PlainTextLeafSourceSignature(
 				prepared.editPlaceholderText,
 				st.body,
-				PlainTextMinResizeWidth(st.body)),
+				PlainTextMinResizeWidth(st.body),
+				rtl),
 			&block.placeholderLeaf);
 		break;
 	case PreparedBlockKind::Photo:
@@ -1205,14 +1257,16 @@ void CopyBlockCachedTextLeafs(
 			MarkedTextLeafSourceSignature(
 				prepared.text,
 				st.body,
-				FlowTextMinResizeWidth(st.body)),
+				FlowTextMinResizeWidth(st.body),
+				rtl),
 			&block.leaf);
 		copyBlockLeaf(
 			CachedTextLeafSlot::Placeholder,
 			PlainTextLeafSourceSignature(
 				prepared.editPlaceholderText,
 				st.body,
-				PlainTextMinResizeWidth(st.body)),
+				PlainTextMinResizeWidth(st.body),
+				rtl),
 			&block.placeholderLeaf);
 		break;
 	case PreparedBlockKind::Rule:
@@ -1228,7 +1282,8 @@ void CopyBlockCachedTextLeafs(
 		std::vector<LaidOutBlock> *blocks,
 		const style::Markdown &st,
 		CachedTextLeafPool *pool,
-		std::vector<int> *preparedPath) {
+		std::vector<int> *preparedPath,
+		bool rtl) {
 	if (!pool || !blocks || !preparedPath) {
 		return;
 	}
@@ -1240,12 +1295,40 @@ void CopyBlockCachedTextLeafs(
 			(*blocks)[i],
 			st,
 			pool,
-			*preparedPath);
+			*preparedPath,
+			rtl);
 		preparedPath->pop_back();
 	}
 }
 
 } // namespace
+
+bool TextNeedsRetainedLeaf(const QString &text) {
+	const auto size = int(text.size());
+	for (auto i = 0; i != size; ++i) {
+		const auto ch = text[i];
+		if (Ui::Text::IsTrimmed(ch)
+			|| Ui::Text::IsReplacedBySpace(ch)
+			|| Ui::Text::IsDiacritic(ch)
+			|| ch.isLowSurrogate()) {
+			continue;
+		} else if (!ch.isHighSurrogate()) {
+			return true;
+		} else if (i + 1 != size && text[i + 1].isLowSurrogate()) {
+			if (QChar::surrogateToUcs4(ch, text[i + 1]) < 0xE0000) {
+				return true;
+			}
+			++i;
+		}
+	}
+	return false;
+}
+
+bool MissingRetainedLeaf(
+		const QString &text,
+		const Ui::Text::String &leaf) {
+	return TextNeedsRetainedLeaf(text) && leaf.isEmpty();
+}
 
 void BuildOrReuseMarkedTextLeaf(
 		Ui::Text::String *leaf,
@@ -1265,7 +1348,11 @@ void BuildOrReuseMarkedTextLeaf(
 		nullptr,
 		context,
 		BlockCachedTextLeafKey(slot, prepared, context.preparedPath),
-		MarkedTextLeafSourceSignature(text, textStyle, minResizeWidth),
+		MarkedTextLeafSourceSignature(
+			text,
+			textStyle,
+			minResizeWidth,
+			context.rtl),
 		[&](Ui::Text::String *leaf,
 				Spellchecker::HighlightProcessId*) {
 			SetTextLeaf(
@@ -1277,6 +1364,7 @@ void BuildOrReuseMarkedTextLeaf(
 				inlineFormulaObjects,
 				mediaRuntime,
 				minResizeWidth,
+				context.rtl,
 				context.repaint,
 				context.repaintRect);
 			BindLinks(leaf, links);
@@ -1297,10 +1385,19 @@ void BuildOrReusePlainTextLeaf(
 		nullptr,
 		context,
 		BlockCachedTextLeafKey(slot, prepared, context.preparedPath),
-		PlainTextLeafSourceSignature(text, textStyle, minResizeWidth),
+		PlainTextLeafSourceSignature(
+			text,
+			textStyle,
+			minResizeWidth,
+			context.rtl),
 		[&](Ui::Text::String *leaf,
 				Spellchecker::HighlightProcessId*) {
-			SetPlainTextLeaf(leaf, textStyle, text, minResizeWidth);
+			SetPlainTextLeaf(
+				leaf,
+				textStyle,
+				text,
+				minResizeWidth,
+				context.rtl);
 		});
 }
 
@@ -1316,21 +1413,37 @@ void BuildOrReuseEditPlaceholderLeaf(
 		return;
 	}
 	*placeholderText = text;
-	BuildOrReusePlainTextLeaf(
+	const auto value = EditPlaceholderTextValue(prepared, text);
+	BuildOrReuseCachedTextLeaf(
 		placeholderLeaf,
-		CachedTextLeafSlot::Placeholder,
-		prepared,
-		textStyle,
-		*placeholderText,
-		minResizeWidth,
-		context);
+		nullptr,
+		context,
+		BlockCachedTextLeafKey(
+			CachedTextLeafSlot::Placeholder,
+			prepared,
+			context.preparedPath),
+		MarkedTextLeafSourceSignature(
+			value,
+			textStyle,
+			minResizeWidth,
+			context.rtl),
+		[&](Ui::Text::String *leaf,
+				Spellchecker::HighlightProcessId*) {
+			SetSimpleMarkedTextLeaf(
+				leaf,
+				textStyle,
+				value,
+				minResizeWidth,
+				context.rtl);
+		});
 }
 
 void CopyCachedTextLeafs(
 		const std::vector<PreparedBlock> &preparedBlocks,
 		std::vector<LaidOutBlock> *blocks,
 		const style::Markdown &st,
-		CachedTextLeafPool *pool) {
+		CachedTextLeafPool *pool,
+		bool rtl) {
 	if (!pool) {
 		return;
 	}
@@ -1341,7 +1454,8 @@ void CopyCachedTextLeafs(
 		blocks,
 		st,
 		pool,
-		&preparedPath);
+		&preparedPath,
+		rtl);
 }
 
 size_t CachedTextLeafKeyHasher::operator()(
@@ -1461,7 +1575,7 @@ bool LayoutMediaCaptionGeometry(
 		block->textWidth,
 		ResolveEditableHeight(
 			std::max(
-				block->leaf.countHeight(block->textWidth, true),
+				block->leaf.countHeight(block->textWidth),
 				TextLineHeight(st.body)),
 			context));
 	*bottom = block->textRect.y() + block->textRect.height();
@@ -1578,6 +1692,16 @@ bool IsAnchorOnlyBlock(const PreparedBlock &block) {
 
 QString ListMarkerText(const PreparedBlock &block) {
 	if (block.listKind == ListKind::Ordered) {
+		if (!block.orderedMarkerText.isEmpty()) {
+			return FormatPreparedOrderedRawMarkerText(
+				block.orderedMarkerText,
+				block.listDelimiter);
+		}
+		if (!block.articleOrderedMarkerText.isEmpty()) {
+			return FormatPreparedOrderedRawMarkerText(
+				block.articleOrderedMarkerText,
+				block.listDelimiter);
+		}
 		const auto delimiter = (block.listDelimiter == ListDelimiter::Parenthesis)
 			? u")"_q
 			: u"."_q;
@@ -1626,9 +1750,8 @@ int ResolveEditableHeight(
 [[nodiscard]] int LeafFirstLineBaseline(
 		const Ui::Text::String &leaf,
 		const QRect &textRect,
-		const style::TextStyle &style,
-		bool breakEverywhere = true) {
-	const auto lines = leaf.countLinesGeometry(textRect.width(), breakEverywhere);
+		const style::TextStyle &style) {
+	const auto lines = leaf.countLinesGeometry(textRect.width());
 	return textRect.y() + (lines.empty()
 		? TextLineBaseline(style)
 		: lines.front().baseline);
@@ -1657,9 +1780,7 @@ int HorizontalMarginsWidth(QMargins margins) {
 }
 
 Ui::Text::GeometryDescriptor TextGeometry(int width) {
-	auto result = Ui::Text::SimpleGeometry(std::max(width, 1), 0, 0, false);
-	result.breakEverywhere = true;
-	return result;
+	return Ui::Text::SimpleGeometry(std::max(width, 1), 0, 0, false);
 }
 
 int TextMinResizeWidth(int width) {
@@ -1718,7 +1839,8 @@ int FlowBlockPreferredWidth(
 			MarkedTextLeafSourceSignature(
 				prepared.text,
 				textStyle,
-				minResizeWidth),
+				minResizeWidth,
+				context.rtl),
 			[&](Ui::Text::String *leaf,
 					Spellchecker::HighlightProcessId*) {
 				SetTextLeaf(
@@ -1730,6 +1852,7 @@ int FlowBlockPreferredWidth(
 					inlineFormulaObjects,
 					mediaRuntime,
 					minResizeWidth,
+					context.rtl,
 					context.repaint,
 					context.repaintRect);
 				BindLinks(leaf, prepared.links);
@@ -1739,23 +1862,29 @@ int FlowBlockPreferredWidth(
 				return leaf.maxWidth();
 			});
 	}
+	const auto &placeholderStyle = EditPlaceholderTextStyleFor(prepared, st);
+	const auto value = EditPlaceholderTextValue(
+		prepared,
+		prepared.editPlaceholderText);
 	return WithCachedTextLeaf(
 		context,
 		BlockCachedTextLeafKey(
 			CachedTextLeafSlot::Placeholder,
 			prepared,
 			context.preparedPath),
-		PlainTextLeafSourceSignature(
-			prepared.editPlaceholderText,
-			textStyle,
-			PlainTextMinResizeWidth(textStyle)),
+		MarkedTextLeafSourceSignature(
+			value,
+			placeholderStyle,
+			PlainTextMinResizeWidth(placeholderStyle),
+			context.rtl),
 		[&](Ui::Text::String *leaf,
 				Spellchecker::HighlightProcessId*) {
-			SetPlainTextLeaf(
+			SetSimpleMarkedTextLeaf(
 				leaf,
-				textStyle,
-				prepared.editPlaceholderText,
-				PlainTextMinResizeWidth(textStyle));
+				placeholderStyle,
+				value,
+				PlainTextMinResizeWidth(placeholderStyle),
+				context.rtl);
 		},
 		[](const Ui::Text::String &leaf,
 				Spellchecker::HighlightProcessId) {
@@ -1785,7 +1914,8 @@ int FlowBlockContentMinimumWidth(
 		MarkedTextLeafSourceSignature(
 			prepared.text,
 			textStyle,
-			minResizeWidth),
+			minResizeWidth,
+			context.rtl),
 		[&](Ui::Text::String *leaf,
 				Spellchecker::HighlightProcessId*) {
 			SetTextLeaf(
@@ -1797,6 +1927,7 @@ int FlowBlockContentMinimumWidth(
 				inlineFormulaObjects,
 				mediaRuntime,
 				minResizeWidth,
+				context.rtl,
 				context.repaint,
 				context.repaintRect);
 			BindLinks(leaf, prepared.links);
@@ -1829,7 +1960,8 @@ int DetailsSummaryContentMinimumWidth(
 		MarkedTextLeafSourceSignature(
 			prepared.text,
 			st.details.summaryStyle,
-			minResizeWidth),
+			minResizeWidth,
+			context.rtl),
 		[&](Ui::Text::String *leaf,
 				Spellchecker::HighlightProcessId*) {
 			SetTextLeaf(
@@ -1841,6 +1973,7 @@ int DetailsSummaryContentMinimumWidth(
 				inlineFormulaObjects,
 				mediaRuntime,
 				minResizeWidth,
+				context.rtl,
 				context.repaint,
 				context.repaintRect);
 			BindLinks(leaf, prepared.links);
@@ -1885,14 +2018,16 @@ int CodeBlockPreferredWidth(
 			PlainTextLeafSourceSignature(
 				prepared.editPlaceholderText,
 				st.code,
-				PlainTextMinResizeWidth(st.code)),
+				PlainTextMinResizeWidth(st.code),
+				context.rtl),
 			[&](Ui::Text::String *leaf,
 					Spellchecker::HighlightProcessId*) {
 				SetPlainTextLeaf(
 					leaf,
 					st.code,
 					prepared.editPlaceholderText,
-					PlainTextMinResizeWidth(st.code));
+					PlainTextMinResizeWidth(st.code),
+					context.rtl);
 			},
 			[](const Ui::Text::String &leaf,
 					Spellchecker::HighlightProcessId) {
@@ -1982,14 +2117,16 @@ int DisplayMathPreferredWidth(
 				PlainTextLeafSourceSignature(
 					prepared.editPlaceholderText,
 					st.displayMath.fallbackStyle,
-					DisplayMathFallbackTextMinResizeWidth(st)),
+					DisplayMathFallbackTextMinResizeWidth(st),
+					context.rtl),
 				[&](Ui::Text::String *leaf,
 						Spellchecker::HighlightProcessId*) {
 					SetPlainTextLeaf(
 						leaf,
 						st.displayMath.fallbackStyle,
 						prepared.editPlaceholderText,
-						DisplayMathFallbackTextMinResizeWidth(st));
+						DisplayMathFallbackTextMinResizeWidth(st),
+						context.rtl);
 				},
 				[](const Ui::Text::String &leaf,
 						Spellchecker::HighlightProcessId) {
@@ -2007,7 +2144,8 @@ int DisplayMathPreferredWidth(
 			MarkedTextLeafSourceSignature(
 				DisplayMathFallbackText(),
 				st.displayMath.fallbackStyle,
-				DisplayMathFallbackTextMinResizeWidth(st)),
+				DisplayMathFallbackTextMinResizeWidth(st),
+				false),
 			[&](Ui::Text::String *leaf,
 					Spellchecker::HighlightProcessId*) {
 				*leaf = Ui::Text::String(
@@ -2134,6 +2272,23 @@ int TableGridWidth(
 	return result;
 }
 
+QRect TableCellHitRect(
+		const LaidOutBlock &block,
+		const LaidOutTableCell &cell) {
+	if (cell.outer.isEmpty() || block.tableBorder <= 0) {
+		return cell.outer;
+	}
+	const auto expanded = cell.outer.adjusted(
+		0,
+		0,
+		block.tableBorder,
+		block.tableBorder);
+	if (block.visibleTableRect.contains(cell.outer)) {
+		return expanded.intersected(block.visibleTableRect);
+	}
+	return expanded;
+}
+
 int TableBlockContentMinimumWidth(
 		const PreparedBlock &prepared,
 		const std::vector<PreparedFormulaSlot> &formulas,
@@ -2155,7 +2310,8 @@ int TableBlockContentMinimumWidth(
 				MarkedTextLeafSourceSignature(
 					prepared.text,
 					st.body,
-					minResizeWidth),
+					minResizeWidth,
+					context.rtl),
 				[&](Ui::Text::String *leaf,
 						Spellchecker::HighlightProcessId*) {
 					SetTextLeaf(
@@ -2167,6 +2323,7 @@ int TableBlockContentMinimumWidth(
 						inlineFormulaObjects,
 						mediaRuntime,
 						minResizeWidth,
+						context.rtl,
 						context.repaint,
 						context.repaintRect);
 					BindLinks(leaf, prepared.links);
@@ -2193,44 +2350,75 @@ int TableBlockContentMinimumWidth(
 				cellIndex != cellCount;
 				++cellIndex) {
 			const auto &cell = row.cells[cellIndex];
-			if (cell.text.text.isEmpty()) {
+			const auto usePlaceholder = cell.text.text.isEmpty()
+				&& !cell.editPlaceholderText.isEmpty();
+			if (cell.text.text.isEmpty() && !usePlaceholder) {
 				continue;
 			}
 			const auto &textStyle = TableCellTextStyle(cell, st);
 			const auto minResizeWidth = TableCellTextMinResizeWidth(
 				textStyle,
 				st);
-			const auto leafMinimum = WithCachedTextLeaf(
-				context,
-				TableCellCachedTextLeafKey(
-					CachedTextLeafSlot::TableCellText,
-					cell,
-					context.preparedPath,
-					rowIndex,
-					cellIndex),
-				MarkedTextLeafSourceSignature(
-					cell.text,
-					textStyle,
-					minResizeWidth),
-				[&](Ui::Text::String *leaf,
-						Spellchecker::HighlightProcessId*) {
-					SetTextLeaf(
-						leaf,
+			const auto leafMinimum = usePlaceholder
+				? WithCachedTextLeaf(
+					context,
+					TableCellCachedTextLeafKey(
+						CachedTextLeafSlot::TableCellPlaceholder,
+						cell,
+						context.preparedPath,
+						rowIndex,
+						cellIndex),
+					PlainTextLeafSourceSignature(
+						cell.editPlaceholderText,
 						textStyle,
-						st,
-						cell.text,
-						&formulas,
-						inlineFormulaObjects,
-						mediaRuntime,
 						minResizeWidth,
-						context.repaint,
-						context.repaintRect);
-					BindLinks(leaf, cell.links);
-				},
-				[](const Ui::Text::String &leaf,
-						Spellchecker::HighlightProcessId) {
-					return LeafMinimumWidth(leaf);
-				});
+						context.rtl),
+					[&](Ui::Text::String *leaf,
+							Spellchecker::HighlightProcessId*) {
+						SetPlainTextLeaf(
+							leaf,
+							textStyle,
+							cell.editPlaceholderText,
+							minResizeWidth,
+							context.rtl);
+					},
+					[](const Ui::Text::String &leaf,
+							Spellchecker::HighlightProcessId) {
+						return LeafMinimumWidth(leaf);
+					})
+				: WithCachedTextLeaf(
+					context,
+					TableCellCachedTextLeafKey(
+						CachedTextLeafSlot::TableCellText,
+						cell,
+						context.preparedPath,
+						rowIndex,
+						cellIndex),
+					MarkedTextLeafSourceSignature(
+						cell.text,
+						textStyle,
+						minResizeWidth,
+						context.rtl),
+					[&](Ui::Text::String *leaf,
+							Spellchecker::HighlightProcessId*) {
+						SetTextLeaf(
+							leaf,
+							textStyle,
+							st,
+							cell.text,
+							&formulas,
+							inlineFormulaObjects,
+							mediaRuntime,
+							minResizeWidth,
+							context.rtl,
+							context.repaint,
+							context.repaintRect);
+						BindLinks(leaf, cell.links);
+					},
+					[](const Ui::Text::String &leaf,
+							Spellchecker::HighlightProcessId) {
+						return LeafMinimumWidth(leaf);
+					});
 			if (leafMinimum > 0) {
 				constraints.push_back({
 					.column = std::max(cell.column, 0),
@@ -2384,6 +2572,10 @@ const style::TextStyle &TextStyleFor(
 		const style::Markdown &st) {
 	if (block.kind == PreparedBlockKind::CodeBlock) {
 		return st.code;
+	} else if (block.quoteAuthor) {
+		return st.quoteAuthorStyle;
+	} else if (block.footer) {
+		return st.footer;
 	} else if (block.kind != PreparedBlockKind::Heading) {
 		return st.body;
 	}
@@ -2396,6 +2588,25 @@ const style::TextStyle &TextStyleFor(
 	case 6: return st.heading6;
 	}
 	return st.heading6;
+}
+
+const style::TextStyle &EditPlaceholderTextStyleFor(
+		const PreparedBlock &block,
+		const style::Markdown &st) {
+	return block.quoteAuthor ? st.body : TextStyleFor(block, st);
+}
+
+TextWithEntities EditPlaceholderTextValue(
+		const PreparedBlock &block,
+		const QString &text) {
+	auto result = TextWithEntities::Simple(text);
+	if (block.pullquote && !block.quoteAuthor && !result.text.isEmpty()) {
+		result.entities.push_back(EntityInText(
+			EntityType::Italic,
+			0,
+			result.text.size()));
+	}
+	return result;
 }
 
 void ApplyPreparedEditSources(
@@ -2453,6 +2664,9 @@ void UpdateLaidOutLeafContent(
 	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading: {
 		const auto &textStyle = TextStyleFor(prepared, st);
+		const auto &placeholderStyle = EditPlaceholderTextStyleFor(
+			prepared,
+			st);
 		BuildOrReuseMarkedTextLeaf(
 			&block->leaf,
 			CachedTextLeafSlot::Leaf,
@@ -2473,8 +2687,8 @@ void UpdateLaidOutLeafContent(
 				&block->placeholderLeaf,
 				prepared,
 				prepared.editPlaceholderText,
-				textStyle,
-				PlainTextMinResizeWidth(textStyle),
+				placeholderStyle,
+				PlainTextMinResizeWidth(placeholderStyle),
 				context);
 		}
 	} break;
@@ -2524,6 +2738,8 @@ void UpdateLaidOutLeafContent(
 					DisplayMathFallbackTextMinResizeWidth(st),
 					context);
 			} else {
+				auto fallbackContext = context;
+				fallbackContext.rtl = false;
 				BuildOrReuseMarkedTextLeaf(
 					&block->fallbackLeaf,
 					CachedTextLeafSlot::Fallback,
@@ -2536,7 +2752,7 @@ void UpdateLaidOutLeafContent(
 					nullptr,
 					nullptr,
 					DisplayMathFallbackTextMinResizeWidth(st),
-					context);
+					fallbackContext);
 			}
 		}
 		break;
@@ -2644,7 +2860,11 @@ void UpdateLaidOutLeafContent(
 			context.preparedPath,
 			tableRowIndex,
 			tableCellIndex),
-		MarkedTextLeafSourceSignature(prepared.text, textStyle, minResizeWidth),
+		MarkedTextLeafSourceSignature(
+			prepared.text,
+			textStyle,
+			minResizeWidth,
+			context.rtl),
 		[&](Ui::Text::String *leaf,
 				Spellchecker::HighlightProcessId*) {
 			SetTextLeaf(
@@ -2656,6 +2876,7 @@ void UpdateLaidOutLeafContent(
 				inlineFormulaObjects,
 				mediaRuntime,
 				minResizeWidth,
+				context.rtl,
 				context.repaint,
 				context.repaintRect);
 			BindLinks(leaf, prepared.links);
@@ -2677,14 +2898,16 @@ void UpdateLaidOutLeafContent(
 			PlainTextLeafSourceSignature(
 				cell->placeholderText,
 				textStyle,
-				minResizeWidth),
+				minResizeWidth,
+				context.rtl),
 			[&](Ui::Text::String *leaf,
 					Spellchecker::HighlightProcessId*) {
 			SetPlainTextLeaf(
 				leaf,
 				textStyle,
 				cell->placeholderText,
-				minResizeWidth);
+				minResizeWidth,
+				context.rtl);
 			});
 	}
 }
@@ -2698,7 +2921,8 @@ void UpdateLaidOutLeafContent(
 	int width,
 	int logicalWidth,
 	bool scrollOwner,
-	LayoutContext context);
+	LayoutContext context,
+	bool allowMissingLeaf = false);
 [[nodiscard]] std::optional<int> LayoutCodeBlockGeometry(
 	const PreparedBlock &prepared,
 	LaidOutBlock *block,
@@ -2796,8 +3020,11 @@ LaidOutBlock LayoutFlowBlock(
 	block.headingLevel = prepared.headingLevel;
 	block.supplementary = prepared.supplementary;
 	block.pullquote = prepared.pullquote;
+	block.quoteAuthor = prepared.quoteAuthor;
+	block.footer = prepared.footer;
 	block.flowTextAlign = CellAlign(prepared.flowAlignment);
 	const auto &textStyle = TextStyleFor(prepared, st);
+	const auto &placeholderStyle = EditPlaceholderTextStyleFor(prepared, st);
 	if (!IsAnchorOnlyBlock(prepared)) {
 		BuildOrReuseMarkedTextLeaf(
 			&block.leaf,
@@ -2820,12 +3047,12 @@ LaidOutBlock LayoutFlowBlock(
 				&block.placeholderLeaf,
 				prepared,
 				prepared.editPlaceholderText,
-				textStyle,
-				PlainTextMinResizeWidth(textStyle),
+				placeholderStyle,
+				PlainTextMinResizeWidth(placeholderStyle),
 				context);
 		}
 	}
-	const auto bottom = LayoutFlowBlockGeometry(
+	auto bottom = LayoutFlowBlockGeometry(
 		prepared,
 		&block,
 		st,
@@ -2835,6 +3062,52 @@ LaidOutBlock LayoutFlowBlock(
 		logicalWidth,
 		scrollOwner,
 		context);
+	if (!bottom) {
+		if (!IsAnchorOnlyBlock(prepared)) {
+			if (MissingRetainedLeaf(prepared.text.text, block.leaf)) {
+				SetTextLeaf(
+					&block.leaf,
+					textStyle,
+					st,
+					prepared.text,
+					formulas,
+					inlineFormulaObjects,
+					mediaRuntime,
+					FlowBlockMinimumWidth(prepared, st),
+					context.rtl,
+					context.repaint,
+					context.repaintRect);
+				SetTextLeafSpoilerLinkFilter(
+					&block.leaf,
+					context.spoilerLinkFilter);
+				BindLinks(&block.leaf, prepared.links);
+			}
+			const auto usePlaceholder = prepared.text.text.isEmpty()
+				&& !prepared.editPlaceholderText.isEmpty();
+			if (usePlaceholder && block.placeholderLeaf.isEmpty()) {
+				block.placeholderText = prepared.editPlaceholderText;
+				SetSimpleMarkedTextLeaf(
+					&block.placeholderLeaf,
+					placeholderStyle,
+					EditPlaceholderTextValue(
+						prepared,
+						block.placeholderText),
+					PlainTextMinResizeWidth(placeholderStyle),
+					context.rtl);
+			}
+		}
+		bottom = LayoutFlowBlockGeometry(
+			prepared,
+			&block,
+			st,
+			left,
+			top,
+			width,
+			logicalWidth,
+			scrollOwner,
+			context,
+			true);
+	}
 	Expects(bottom.has_value());
 	return FinalizeLaidOutBlock(std::move(block));
 }
@@ -2984,6 +3257,8 @@ LaidOutBlock LayoutDisplayMathBlock(
 				DisplayMathFallbackTextMinResizeWidth(st),
 				context);
 		} else {
+			auto fallbackContext = context;
+			fallbackContext.rtl = false;
 			BuildOrReuseMarkedTextLeaf(
 				&block.fallbackLeaf,
 				CachedTextLeafSlot::Fallback,
@@ -2996,7 +3271,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 				nullptr,
 				nullptr,
 				DisplayMathFallbackTextMinResizeWidth(st),
-				context);
+				fallbackContext);
 		}
 	}
 	const auto bottom = LayoutDisplayMathBlockGeometry(
@@ -3496,14 +3771,18 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		int width,
 		int logicalWidth,
 		bool scrollOwner,
-		LayoutContext context) {
+		LayoutContext context,
+		bool allowMissingLeaf) {
 	if (!block) {
 		return std::nullopt;
 	}
 	const auto usePlaceholder = prepared.text.text.isEmpty()
 		&& !prepared.editPlaceholderText.isEmpty();
-	if (MissingRetainedLeaf(prepared.text.text, block->leaf)
-		|| MissingRetainedPlaceholderLeaf(usePlaceholder, block->placeholderLeaf)) {
+	if (!allowMissingLeaf
+		&& (MissingRetainedLeaf(prepared.text.text, block->leaf)
+			|| MissingRetainedPlaceholderLeaf(
+				usePlaceholder,
+				block->placeholderLeaf))) {
 		return std::nullopt;
 	}
 	ClearBlockGeometry(block);
@@ -3871,7 +4150,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 			block->textWidth,
 			ResolveEditableHeight(
 				std::max(
-					displayLeaf.countHeight(block->textWidth, true),
+					displayLeaf.countHeight(block->textWidth),
 					TextLineHeight(st.body)),
 				context));
 		block->firstLineBaseline = LeafFirstLineBaseline(
@@ -3943,6 +4222,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		&block->overflowed);
 	const auto &padding = st.table.cellPadding;
 	const auto border = TableBorder(block->tableBordered, st);
+	block->tableBorder = border;
 	auto tableWidth = border;
 	for (const auto columnWidth : block->tableColumnWidths) {
 		tableWidth += columnWidth + border;
@@ -4189,7 +4469,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		1);
 	block->labelWidth = contentWidth;
 	const auto labelHeight = std::max(
-		block->labelLeaf.countHeight(contentWidth, true),
+		block->labelLeaf.countHeight(contentWidth),
 		TextLineHeight(style.labelStyle));
 	const auto mediaHeight = std::max(
 		style.minHeight,
@@ -4408,7 +4688,11 @@ LaidOutBlock LayoutGroupedMediaBlock(
 	block->mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block->visibleMediaRect = block->mediaRect;
 	if (block->mediaBlock) {
-		ApplyMediaBlockGeometry(block, block->mediaRect, st);
+		ApplyMediaBlockGeometry(
+			block,
+			block->mediaRect,
+			st,
+			context.mediaPixelScale);
 	}
 	auto bottom = block->mediaRect.y() + block->mediaRect.height()
 		+ padding.bottom();
@@ -4459,7 +4743,11 @@ LaidOutBlock LayoutGroupedMediaBlock(
 	block->mediaRect = QRect(left, top, blockWidth, cardHeight);
 	block->visibleMediaRect = block->mediaRect;
 	if (block->mediaBlock) {
-		ApplyMediaBlockGeometry(block, block->mediaRect, st);
+		ApplyMediaBlockGeometry(
+			block,
+			block->mediaRect,
+			st,
+			context.mediaPixelScale);
 	}
 	auto bottom = top + cardHeight;
 	if (!LayoutMediaCaptionGeometry(
@@ -4546,7 +4834,9 @@ std::optional<int> RecountSimpleLaidOutBlock(
 			scrollOwner,
 			context);
 	case PreparedBlockKind::Photo:
-		if (!block || !block->mediaBlock) {
+		if (!block
+			|| !block->mediaBlock
+			|| !block->mediaBlock->alive()) {
 			return std::nullopt;
 		}
 		return LayoutFramedMediaBlockGeometry(
@@ -4563,7 +4853,9 @@ std::optional<int> RecountSimpleLaidOutBlock(
 			prepared.photo.width,
 			context);
 	case PreparedBlockKind::Video:
-		if (!block || !block->mediaBlock) {
+		if (!block
+			|| !block->mediaBlock
+			|| !block->mediaBlock->alive()) {
 			return std::nullopt;
 		}
 		return LayoutFramedMediaBlockGeometry(
@@ -4580,7 +4872,9 @@ std::optional<int> RecountSimpleLaidOutBlock(
 			prepared.video.media.width,
 			context);
 	case PreparedBlockKind::Audio:
-		if (!block || !block->mediaBlock) {
+		if (!block
+			|| !block->mediaBlock
+			|| !block->mediaBlock->alive()) {
 			return std::nullopt;
 		}
 		return LayoutCardMediaBlockGeometry(
@@ -4594,7 +4888,9 @@ std::optional<int> RecountSimpleLaidOutBlock(
 			st.audio.captionSkip,
 			context);
 	case PreparedBlockKind::Map:
-		if (!block || !block->mediaBlock) {
+		if (!block
+			|| !block->mediaBlock
+			|| !block->mediaBlock->alive()) {
 			return std::nullopt;
 		}
 		return LayoutFramedMediaBlockGeometry(
@@ -4611,7 +4907,9 @@ std::optional<int> RecountSimpleLaidOutBlock(
 			0,
 			context);
 	case PreparedBlockKind::Channel:
-		if (!block || !block->mediaBlock) {
+		if (!block
+			|| !block->mediaBlock
+			|| !block->mediaBlock->alive()) {
 			return std::nullopt;
 		}
 		return LayoutCardMediaBlockGeometry(
@@ -4625,7 +4923,9 @@ std::optional<int> RecountSimpleLaidOutBlock(
 			st.audio.captionSkip,
 			context);
 	case PreparedBlockKind::GroupedMedia:
-		if (!block || !block->mediaBlock) {
+		if (!block
+			|| !block->mediaBlock
+			|| !block->mediaBlock->alive()) {
 			return std::nullopt;
 		}
 		return LayoutFramedMediaBlockGeometry(

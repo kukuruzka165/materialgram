@@ -313,6 +313,17 @@ void BottomInfo::paint(
 			firstLineBottom + st::historySilentTop,
 			outerWidth);
 	}
+	if (_data.flags & Data::Flag::Ephemeral) {
+		const auto &icon = inverted
+			? st->historyEphemeralInvertedIcon()
+			: stm->historyEphemeralIcon;
+		right -= st::historyEphemeralStateWidth;
+		icon.paint(
+			p,
+			right,
+			firstLineBottom + st::historyEphemeralStateTop,
+			outerWidth);
+	}
 
 	if (_data.flags & Data::Flag::Pinned) {
 		const auto &icon = inverted
@@ -594,6 +605,9 @@ QSize BottomInfo::countOptimalSize() {
 	if (_data.flags & Data::Flag::Silent) {
 		width += st::historySilentWidth;
 	}
+	if (_data.flags & Data::Flag::Ephemeral) {
+		width += st::historyEphemeralStateWidth;
+	}
 	_effectMaxWidth = countEffectMaxWidth();
 	width += _effectMaxWidth;
 	const auto dateHeight = (_data.flags & Data::Flag::Sponsored)
@@ -690,6 +704,12 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	}
 	if (item->isSending() || item->hasFailed()) {
 		result.flags |= Flag::Sending;
+	}
+	if (item->isEphemeral()
+		&& !message->hasBubble()
+		&& (!message->media()
+			|| !message->media()->drawsOwnEphemeralBadge())) {
+		result.flags |= Flag::Ephemeral;
 	}
 	if (!item->history()->peer->isUser()) {
 		const auto mine = PaidInformation{

@@ -122,10 +122,25 @@ void TaskbarButtons::buttonClicked(int id) {
 }
 
 void TaskbarButtons::refreshTheme() {
-	refreshIcons();
-	if (_created) {
-		apply(currentState(), false);
+	scheduleApply();
+}
+
+void TaskbarButtons::scheduleApply() {
+	if (_applyScheduled) {
+		return;
 	}
+	_applyScheduled = true;
+	crl::on_main(this, [=] {
+		_applyScheduled = false;
+		const auto iconsChanged = refreshIcons();
+		if (!_created) {
+			return;
+		}
+		const auto state = currentState();
+		if (iconsChanged || state != _applied) {
+			apply(state, false);
+		}
+	});
 }
 
 TaskbarButtons::State TaskbarButtons::currentState() const {
@@ -144,10 +159,10 @@ TaskbarButtons::State TaskbarButtons::currentState() const {
 	return result;
 }
 
-void TaskbarButtons::refreshIcons() {
+bool TaskbarButtons::refreshIcons() {
 	const auto dark = IsDarkTaskbar();
 	if (_iconsDark == dark && _previousIcon) {
-		return;
+		return false;
 	}
 	destroyIcons();
 	_iconsDark = dark;
@@ -158,6 +173,7 @@ void TaskbarButtons::refreshIcons() {
 	_playIcon = CreateThumbIcon(st::windowTaskbarThumbPlay, color);
 	_pauseIcon = CreateThumbIcon(st::windowTaskbarThumbPause, color);
 	_nextIcon = CreateThumbIcon(st::windowTaskbarThumbNext, color);
+	return true;
 }
 
 void TaskbarButtons::destroyIcons() {
@@ -174,14 +190,17 @@ void TaskbarButtons::updateFromPlayer() {
 	if (!_created) {
 		return;
 	}
-	const auto state = currentState();
-	if (state == _applied) {
-		return;
-	}
-	apply(state, false);
+	scheduleApply();
 }
 
 void TaskbarButtons::apply(State state, bool create) {
+	if (_applying) {
+		scheduleApply();
+		return;
+	}
+	_applying = true;
+	const auto guard = gsl::finally([&] { _applying = false; });
+
 	auto buttons = std::array<THUMBBUTTON, kButtonsCount>();
 
 	FillButton(

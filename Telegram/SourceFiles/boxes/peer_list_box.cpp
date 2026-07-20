@@ -29,7 +29,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "storage/file_download.h"
 #include "data/data_peer_values.h"
+#include "data/data_channel.h"
 #include "data/data_chat.h"
+#include "data/data_community.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -452,6 +454,17 @@ bool PeerListController::hasComplexSearch() const {
 	return (_searchController != nullptr);
 }
 
+void PeerListController::customRowAddRipple(
+		not_null<PeerListRow*> row,
+		QPoint point,
+		Fn<void()> updateCallback) {
+	row->addRipple(
+		computeListSt().item,
+		customRowRippleMaskGenerator(),
+		point,
+		std::move(updateCallback));
+}
+
 void PeerListController::search(const QString &query) {
 	Expects(hasComplexSearch());
 
@@ -732,8 +745,16 @@ void PeerListRow::refreshStatus() {
 		}
 	} else if (peer()->isMegagroup()) {
 		setStatusText(tr::lng_group_status(tr::now));
-	} else if (peer()->isChannel()) {
-		setStatusText(tr::lng_channel_status(tr::now));
+	} else if (const auto channel = peer()->asChannel()) {
+		if (channel->isCommunity()) {
+			const auto info = channel->communityInfo();
+			const auto count = info ? int(info->histories().size()) : 0;
+			setStatusText(count
+				? tr::lng_community_chats(tr::now, lt_count, count)
+				: tr::lng_community_status(tr::now));
+		} else {
+			setStatusText(tr::lng_channel_status(tr::now));
+		}
 	}
 }
 
@@ -1028,6 +1049,21 @@ void PeerListRow::paintUserpic(
 		int x,
 		int y,
 		int outerWidth) {
+	if (paintCommunityUserpicEffect()) {
+		if (!_communityUserpicEffect) {
+			_communityUserpicEffect
+				= std::make_unique<Ui::CommunityUserpicEffect>();
+		}
+		Ui::PaintCommunityUserpicEffect(
+			p,
+			*_communityUserpicEffect,
+			x,
+			y,
+			st.photoSize,
+			st::windowSubTextFg->c);
+	} else if (_communityUserpicEffect) {
+		_communityUserpicEffect = nullptr;
+	}
 	if (_disabledState == State::DisabledChecked) {
 		paintDisabledCheckUserpic(p, st, x, y, outerWidth);
 	} else if (_checkbox) {
@@ -1111,6 +1147,11 @@ void PeerListRow::lazyInitialize(const style::PeerListItem &st) {
 
 bool PeerListRow::useForumLikeUserpic() const {
 	return !special() && peer()->isForum();
+}
+
+bool PeerListRow::paintCommunityUserpicEffect() const {
+	const auto channel = special() ? nullptr : peer()->asChannel();
+	return channel && channel->isCommunity();
 }
 
 void PeerListRow::createCheckbox(
@@ -1640,10 +1681,6 @@ void PeerListContent::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
 	const auto clip = e->rect();
-	if (_mode != Mode::Custom) {
-		p.fillRect(clip, _st.item.button.textBg);
-	}
-
 	const auto repaintByStatusAfter = _repaintByStatus.remainingTime();
 	auto repaintAfterMin = repaintByStatusAfter;
 
@@ -1651,8 +1688,27 @@ void PeerListContent::paintEvent(QPaintEvent *e) {
 	const auto now = crl::now();
 	const auto yFrom = clip.y() - rowsTopCached;
 	const auto yTo = clip.y() + clip.height() - rowsTopCached;
-	p.translate(0, rowsTopCached);
 	const auto count = shownRowsCount();
+	if (_mode != Mode::Custom) {
+		auto fill = QRegion(clip);
+		if (count > 0 && !sectionsShown()) {
+			const auto from = floorclamp(yFrom, _rowHeight, 0, count);
+			const auto to = ceilclamp(yTo, _rowHeight, 0, count);
+			for (auto index = from; index != to; ++index) {
+				if (getRow(RowIndex(index))->opacity() == 1.) {
+					fill -= QRect(
+						0,
+						rowsTopCached + index * _rowHeight,
+						width(),
+						_rowHeight);
+				}
+			}
+		}
+		for (const auto &rect : fill) {
+			p.fillRect(rect, _st.item.button.textBg);
+		}
+	}
+	p.translate(0, rowsTopCached);
 	const auto handleRepaintAfter = [&](crl::time repaintAfter) {
 		if (repaintAfter > 0
 			&& (repaintAfterMin < 0
@@ -1845,7 +1901,10 @@ void PeerListContent::mousePressEvent(QMouseEvent *e) {
 		} else {
 			auto point = mapFromGlobal(QCursor::pos()) - QPoint(0, getRowTop(_selected.index));
 			if (_mode == Mode::Custom) {
-				row->addRipple(_st.item, _controller->customRowRippleMaskGenerator(), point, std::move(updateCallback));
+				_controller->customRowAddRipple(
+					row,
+					point,
+					std::move(updateCallback));
 			} else {
 				const auto maskGenerator = [&] {
 					return Ui::RippleAnimation::RectMask(
@@ -1979,7 +2038,6 @@ crl::time PeerListContent::paintRow(
 	const auto &st = row->computeSt(_st.item);
 
 	row->lazyInitialize(st);
-	const auto outerWidth = width();
 
 	auto refreshStatusAt = row->refreshStatusTime();
 	if (refreshStatusAt > 0 && now >= refreshStatusAt) {
@@ -2007,6 +2065,7 @@ crl::time PeerListContent::paintRow(
 	if (_rowsScrollCache.scrolling()
 		&& !selected
 		&& !activeElement
+		&& !row->elementsAnimating()
 		&& width() > 0
 		&& row->opacity() == 1.) {
 		const auto ratio = style::DevicePixelRatio();
@@ -2526,11 +2585,21 @@ void PeerListContent::setSelected(Selected selected) {
 	if (_selected == selected) {
 		return;
 	}
+	const auto was = getRow(_selected.index);
 	_selected = selected;
 	updateRow(_selected.index);
 	setCursor(_selected.element ? style::cur_pointer : style::cur_default);
 
 	_selectedIndex = _selected.index.value;
+
+	if (const auto row = getRow(_selected.index)) {
+		_controller->rowElementHovered(
+			row,
+			_selected.element,
+			getElementRect(row, _selected.index, _selected.element));
+	} else if (was) {
+		_controller->rowElementHovered(was, 0, QRect());
+	}
 }
 
 void PeerListContent::setContexted(Selected contexted) {

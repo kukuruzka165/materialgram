@@ -103,6 +103,7 @@ struct TabbedSelectorDescriptor {
 	Fn<QColor()> customTextColor;
 	ComposeFeatures features;
 	uint64 excludeStickerSetId = 0;
+	int searchRightReserved = 0;
 };
 
 enum class TabbedSearchType {
@@ -160,6 +161,7 @@ public:
 	void setCurrentPeer(PeerData *peer);
 	void provideRecentEmoji(
 		const std::vector<EmojiStatusId> &customRecentList);
+	void setSearchRightReserved(int value);
 
 	void hideFinished();
 	void showStarted();
@@ -291,7 +293,7 @@ private:
 	not_null<GifsListWidget*> gifs() const;
 	not_null<StickersListWidget*> masks() const;
 
-	void reinstallSwipe(not_null<Ui::RpWidget*> widget);
+	void reinstallSwipe(not_null<Inner*> widget);
 
 	const style::EmojiPan &_st;
 	const ComposeFeatures _features;
@@ -392,6 +394,11 @@ public:
 	virtual void afterShown() {
 	}
 	virtual void beforeHiding() {
+	}
+	[[nodiscard]] virtual bool canConsumeHorizontalScroll(
+			QPoint position,
+			int delta) {
+		return false;
 	}
 	[[nodiscard]] virtual base::unique_qptr<Ui::PopupMenu> fillContextMenu(
 			const SendMenu::Details &details) {

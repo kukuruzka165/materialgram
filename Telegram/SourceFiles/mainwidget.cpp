@@ -808,7 +808,7 @@ void MainWidget::searchMessages(
 	const auto archiveWindow = (_controller->windowId().type
 		== Window::SeparateType::Archive);
 	if (_dialogs
-		&& !archiveWindow
+		&& (!archiveWindow || inChat.folder())
 		&& (!ForceComposeSearchOneColumn.value() || !isOneColumn())) {
 		auto state = Dialogs::SearchState{
 			.inChat = ((tags.empty() || inChat.sublist())

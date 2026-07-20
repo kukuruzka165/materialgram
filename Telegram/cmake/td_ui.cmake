@@ -117,6 +117,8 @@ PRIVATE
     dialogs/ui/chat_search_empty.h
     dialogs/ui/chat_search_in.cpp
     dialogs/ui/chat_search_in.h
+    dialogs/ui/dialogs_pill.cpp
+    dialogs/ui/dialogs_pill.h
     dialogs/ui/dialogs_quick_action_context.h
     dialogs/ui/dialogs_quick_action.h
     dialogs/ui/dialogs_stories_list.cpp
@@ -396,8 +398,6 @@ PRIVATE
     ui/chat/chat_theme.h
     ui/chat/chats_filter_tag.cpp
     ui/chat/chats_filter_tag.h
-    ui/chat/continuous_scroll.cpp
-    ui/chat/continuous_scroll.h
     ui/chat/forward_options_box.cpp
     ui/chat/forward_options_box.h
     ui/chat/group_call_bar.cpp
@@ -550,6 +550,7 @@ PRIVATE
     ui/widgets/fields/time_part_input_with_placeholder.cpp
     ui/widgets/fields/time_part_input_with_placeholder.h
 
+    ui/widgets/chat_filters_tabs_mode.h
     ui/widgets/chat_filters_tabs_slider.cpp
     ui/widgets/chat_filters_tabs_slider.h
     ui/widgets/chat_filters_tabs_slider_reorder.cpp

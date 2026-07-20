@@ -968,6 +968,7 @@ void EditFilterBox(
 			doneCallback(*result);
 		}
 	};
+	name->submits() | rpl::on_next(save, name->lifetime());
 
 	box->addButton(rpl::conditional(
 		state->creating.value(),

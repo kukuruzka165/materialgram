@@ -24,7 +24,8 @@ void SetupFlexibleRegularScroll(
 	Fn<void(int)> setScrollTopSkip,
 	Fn<void(int)> setInnerTopReserve,
 	Fn<void(QMargins)> setPaintPadding,
-	Fn<void(rpl::producer<not_null<QEvent*>>)> setViewport);
+	Fn<void(rpl::producer<not_null<QEvent*>>)> setViewport,
+	bool abortSnapOnExternalScroll = false);
 
 struct FlexibleScrollData {
 	rpl::event_stream<int> contentHeightValue;
@@ -40,7 +41,8 @@ public:
 		not_null<Ui::RpWidget*> pinnedToTop,
 		Fn<void(QMargins)> setPaintPadding,
 		Fn<void(rpl::producer<not_null<QEvent*>>&&)> setViewport,
-		FlexibleScrollData &data);
+		FlexibleScrollData &data,
+		bool abortSnapOnExternalScroll = false);
 
 private:
 	void setupScrollAnimation();
@@ -54,12 +56,14 @@ private:
 	const Fn<void(QMargins)> _setPaintPadding;
 	const Fn<void(rpl::producer<not_null<QEvent*>>&&)> _setViewport;
 	FlexibleScrollData &_data;
+	const bool _abortSnapOnExternalScroll = false;
 
 	Ui::Animations::Basic _scrollAnimation;
 	int _scrollTopFrom = 0;
 	int _scrollTopTo = 0;
 	crl::time _timeOffset = 0;
 	int _lastScrollApplied = 0;
+	int _lastScrollSeen = -1;
 	rpl::lifetime _filterLifetime;
 };
 

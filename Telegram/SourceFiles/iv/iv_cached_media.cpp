@@ -982,7 +982,9 @@ public:
 		not_null<Main::Session*> session,
 		FullMsgId itemId,
 		Fn<void(QString)> openChannel,
-		Fn<void(QString)> joinChannel);
+		Fn<void(QString)> joinChannel,
+		::Data::FileOrigin draftOrigin = {},
+		base::weak_ptr<Window::SessionController> controller = {});
 	CachedPageMediaRuntime(
 		not_null<Main::Session*> session,
 		not_null<HistoryView::Element*> view,
@@ -1036,6 +1038,7 @@ private:
 
 	[[nodiscard]] HistoryItem *directHostItem() const;
 	[[nodiscard]] HistoryItem *openContextItem() const;
+	[[nodiscard]] Window::SessionController *resolveController() const;
 	void queuePendingInstantViewItem(
 		PendingInstantViewMediaItem::Kind kind,
 		uint64 id,
@@ -1045,8 +1048,10 @@ private:
 	[[nodiscard]] ::Data::FileOrigin fileOrigin() const;
 
 	const not_null<Main::Session*> _session;
+	const base::weak_ptr<Window::SessionController> _controller;
 	const ::Data::FileOrigin _origin;
 	const FullMsgId _itemId;
+	const ::Data::FileOrigin _draftOrigin;
 	const QString _pageUrl;
 	const bool _useExistingView = false;
 	const base::weak_ptr<HistoryView::Element> _view;
@@ -1076,10 +1081,14 @@ CachedPageMediaRuntime::CachedPageMediaRuntime(
 	not_null<Main::Session*> session,
 	FullMsgId itemId,
 	Fn<void(QString)> openChannel,
-	Fn<void(QString)> joinChannel)
+	Fn<void(QString)> joinChannel,
+	::Data::FileOrigin draftOrigin,
+	base::weak_ptr<Window::SessionController> controller)
 : _session(session)
+, _controller(std::move(controller))
 , _origin(itemId)
 , _itemId(itemId)
+, _draftOrigin(std::move(draftOrigin))
 , _pageUrl()
 , _openChannel(std::move(openChannel))
 , _joinChannel(std::move(joinChannel)) {
@@ -1231,6 +1240,9 @@ QString CachedPageMediaRuntime::mentionNameEntityData(uint64 userId) const {
 auto CachedPageMediaRuntime::hostedMediaHost(
 		not_null<Window::SessionController*> controller) const
 -> std::shared_ptr<Markdown::IvHistoryViewMediaHost> {
+	if (_hostedMediaHost && !_hostedMediaHost->itemAlive()) {
+		_hostedMediaHost = nullptr;
+	}
 	if (_useExistingView) {
 		const auto view = _view.get();
 		if (!view) {
@@ -1270,13 +1282,17 @@ auto CachedPageMediaRuntime::hostedMediaHost(
 				controller,
 				history,
 				_pageUrl);
+		if (const auto cloudDraft = std::get_if<::Data::FileOriginCloudDraft>(
+				&_draftOrigin.data)) {
+			_hostedMediaHost->item()->setRichDraftOrigin(*cloudDraft);
+		}
 	}
 	return _hostedMediaHost;
 }
 
 auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 -> std::shared_ptr<Markdown::HostedMediaBlockFactory> {
-	const auto controller = CurrentSessionController(_session);
+	const auto controller = resolveController();
 	if (!controller) {
 		return nullptr;
 	}
@@ -1289,8 +1305,7 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 		[session = _session, host, origin = fileOrigin()](
 				Window::SessionController *controller,
 				const Markdown::PreparedPhotoBlockData &prepared) {
-			if (!controller
-				|| !prepared.viewerOpen
+			if (!prepared.viewerOpen
 				|| !prepared.urlOverride.isEmpty()) {
 				return std::shared_ptr<Markdown::MediaBlock>();
 			}
@@ -1306,6 +1321,8 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			descriptor.copyText = u"Photo"_q;
 			descriptor.layoutHint = QSize(prepared.width, prepared.height);
 			descriptor.host = host;
+			descriptor.spoiler = prepared.spoiler;
+			descriptor.editMode = prepared.editMode;
 			descriptor.mediaFactory = [photo, spoiler = prepared.spoiler](
 					not_null<HistoryView::Element*> view) {
 				return std::make_unique<HistoryView::Photo>(
@@ -1325,9 +1342,8 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 		[session = _session, host, origin = fileOrigin()](
 				Window::SessionController *controller,
 				const Markdown::PreparedVideoBlockData &prepared) {
-			if (!controller
-				|| prepared.media.kind
-					!= Markdown::PreparedMediaItemKind::Document) {
+			if (prepared.media.kind
+				!= Markdown::PreparedMediaItemKind::Document) {
 				return std::shared_ptr<Markdown::MediaBlock>();
 			}
 			const auto document = session->data().document(
@@ -1353,6 +1369,8 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 				prepared.media.width,
 				prepared.media.height);
 			descriptor.host = host;
+			descriptor.spoiler = prepared.media.spoiler;
+			descriptor.editMode = prepared.editMode;
 			descriptor.mediaFactory = [media](
 					not_null<HistoryView::Element*> view) {
 				return media->createView(
@@ -1371,9 +1389,6 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 		[session = _session, host, origin = fileOrigin()](
 				Window::SessionController *controller,
 				const Markdown::PreparedAudioBlockData &prepared) {
-			if (!controller) {
-				return std::shared_ptr<Markdown::MediaBlock>();
-			}
 			const auto document = session->data().document(
 				DocumentId(prepared.documentId));
 			if (document->isNull()
@@ -1409,9 +1424,6 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 		[session = _session, host](
 				Window::SessionController *controller,
 				const Markdown::PreparedMapBlockData &prepared) {
-			if (!controller) {
-				return std::shared_ptr<Markdown::MediaBlock>();
-			}
 			const auto mapSize = QSize(prepared.width, prepared.height);
 			const auto point = CachedPageMapPoint(
 				prepared.latitude,
@@ -1450,19 +1462,28 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 		[session = _session, host, origin = fileOrigin()](
 				Window::SessionController *controller,
 				const Markdown::PreparedGroupedMediaBlockData &prepared) {
-			if (!controller
-				|| (prepared.intent
-					!= Markdown::PreparedGroupedMediaIntent::Collage)
-				|| prepared.items.empty()
+			if (prepared.items.empty()
 				|| (int(prepared.items.size())
 					> HistoryView::GroupedMedia::kMaxSize)) {
 				return std::shared_ptr<Markdown::MediaBlock>();
 			}
+			const auto slideshow = (prepared.intent
+				== Markdown::PreparedGroupedMediaIntent::Slideshow);
 			auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
+			auto slideFactories = std::vector<
+				Markdown::IvHistoryViewMediaDescriptor::MediaFactory>();
+			auto slideSizes = std::vector<QSize>();
+			if (slideshow) {
+				slideFactories.reserve(prepared.items.size());
+				slideSizes.reserve(prepared.items.size());
+			}
 			const auto medias = std::make_shared<
 				std::vector<std::unique_ptr<::Data::Media>>>();
 			medias->reserve(prepared.items.size());
-			for (const auto &item : prepared.items) {
+			for (auto i = 0, count = int(prepared.items.size())
+					; i != count
+					; ++i) {
+				const auto &item = prepared.items[i];
 				const auto kind = item.media.kind;
 				if (kind == Markdown::PreparedMediaItemKind::Photo) {
 					const auto photo = session->data().photo(
@@ -1475,13 +1496,30 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 						host->item(),
 						photo,
 						item.media.spoiler));
-					descriptor.groupedPhotos.emplace(
-						photo->id,
-						std::make_shared<CachedPagePhotoRuntime>(
-							session,
-							photo,
-							origin,
-							host->item()->fullId()));
+					auto runtime = std::make_shared<CachedPagePhotoRuntime>(
+						session,
+						photo,
+						origin,
+						host->item()->fullId());
+					descriptor.groupedPhotos.emplace(photo->id, runtime);
+					descriptor.groupedItemIndices.emplace(photo->id, i);
+					if (item.media.spoiler) {
+						descriptor.groupedSpoileredIds.emplace(photo->id);
+					}
+					if (slideshow) {
+						slideSizes.push_back(QSize(
+							std::max(item.media.width, 1),
+							std::max(item.media.height, 1)));
+						const auto spoiler = item.media.spoiler;
+						slideFactories.push_back([photo, spoiler](
+								not_null<HistoryView::Element*> view) {
+							return std::make_unique<HistoryView::Photo>(
+								view,
+								view->data(),
+								photo,
+								spoiler);
+						});
+					}
 				} else {
 					const auto document = session->data().document(
 						DocumentId(item.media.id));
@@ -1497,29 +1535,50 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 							session,
 							document,
 							item.media.spoiler)));
-					descriptor.groupedDocuments.emplace(
-						document->id,
-						std::make_shared<CachedPageDocumentRuntime>(
-							session,
-							document,
-							origin,
-							host->item()->fullId()));
+					auto runtime = std::make_shared<CachedPageDocumentRuntime>(
+						session,
+						document,
+						origin,
+						host->item()->fullId());
+					descriptor.groupedDocuments.emplace(document->id, runtime);
+					descriptor.groupedItemIndices.emplace(document->id, i);
+					if (item.media.spoiler) {
+						descriptor.groupedSpoileredIds.emplace(document->id);
+					}
+					if (slideshow) {
+						const auto media = medias->back().get();
+						slideSizes.push_back(QSize(
+							std::max(item.media.width, 1),
+							std::max(item.media.height, 1)));
+						slideFactories.push_back([media](
+								not_null<HistoryView::Element*> view) {
+							return media->createView(view, view->data());
+						});
+					}
 				}
 				if (!medias->back()->canBeGrouped()) {
 					return std::shared_ptr<Markdown::MediaBlock>();
 				}
 			}
 			descriptor.stableId = prepared.id.value;
-			descriptor.kind = Markdown::IvHistoryViewMediaKind::GroupedMedia;
 			descriptor.copyText = CachedPageGroupedMediaCopyText(prepared);
-			descriptor.layoutHint = QSize(st::historyGroupWidthMax, 0);
 			descriptor.host = host;
-			descriptor.mediaFactory = [medias](
-					not_null<HistoryView::Element*> view) {
-				return std::make_unique<HistoryView::GroupedMedia>(
-					view,
-					*medias);
-			};
+			descriptor.editMode = prepared.editMode;
+			if (slideshow) {
+				descriptor.kind = Markdown::IvHistoryViewMediaKind::Slideshow;
+				descriptor.slideMediaFactories = std::move(slideFactories);
+				descriptor.slideOriginalSizes = std::move(slideSizes);
+			} else {
+				descriptor.kind
+					= Markdown::IvHistoryViewMediaKind::GroupedMedia;
+				descriptor.layoutHint = QSize(st::historyGroupWidthMax, 0);
+				descriptor.mediaFactory = [medias](
+						not_null<HistoryView::Element*> view) {
+					return std::make_unique<HistoryView::GroupedMedia>(
+						view,
+						*medias);
+				};
+			}
 			descriptor.keepAlive.push_back(medias);
 			return Markdown::CreateIvHistoryViewMediaBlock(
 				std::move(descriptor));
@@ -1545,12 +1604,19 @@ HistoryItem *CachedPageMediaRuntime::directHostItem() const {
 	return _itemId ? _session->data().message(_itemId) : nullptr;
 }
 
+Window::SessionController *CachedPageMediaRuntime::resolveController() const {
+	if (const auto strong = _controller.get()) {
+		return strong;
+	}
+	return _session->tryResolveWindow();
+}
+
 HistoryItem *CachedPageMediaRuntime::openContextItem() const {
 	if (const auto item = directHostItem()) {
 		flushPendingInstantViewItems(not_null{ item });
 		return item;
 	}
-	if (const auto controller = CurrentSessionController(_session)) {
+	if (const auto controller = resolveController()) {
 		if (const auto host = hostedMediaHost(not_null{ controller })) {
 			const auto item = host->item().get();
 			flushPendingInstantViewItems(not_null{ item });
@@ -1638,13 +1704,17 @@ auto CreateMessageMediaRuntime(
 	not_null<Main::Session*> session,
 	FullMsgId itemId,
 	Fn<void(QString)> openChannel,
-	Fn<void(QString)> joinChannel)
+	Fn<void(QString)> joinChannel,
+	::Data::FileOrigin draftOrigin,
+	base::weak_ptr<Window::SessionController> controller)
 -> std::shared_ptr<Markdown::MediaRuntime> {
 	return std::make_shared<CachedPageMediaRuntime>(
 		session,
 		itemId,
 		std::move(openChannel),
-		std::move(joinChannel));
+		std::move(joinChannel),
+		std::move(draftOrigin),
+		std::move(controller));
 }
 
 auto CreateMessageMediaRuntime(

@@ -140,8 +140,22 @@ void EditLinkBox(
 		const QString &startLink,
 		Fn<void(TextWithTags, QString)> callback,
 		const style::InputField *fieldStyle,
-		Fn<QString(QString)> validate) {
+		Fn<QString(QString)> validate,
+		Fn<void(bool)> interactionActive,
+		Fn<void()> restoreFocus) {
 	Expects(callback != nullptr);
+
+	if (interactionActive) {
+		interactionActive(true);
+	}
+	box->boxClosing() | rpl::on_next([=] {
+		if (interactionActive) {
+			interactionActive(false);
+		}
+		if (restoreFocus) {
+			restoreFocus();
+		}
+	}, box->lifetime());
 
 	const auto &fieldSt = fieldStyle ? *fieldStyle : st::defaultInputField;
 	const auto content = box->verticalLayout();
@@ -404,7 +418,9 @@ Fn<bool(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<Ui::InputField*> field,
 		const style::InputField *fieldStyle,
-		Fn<QString(QString)> linkValidator) {
+		Fn<QString(QString)> linkValidator,
+		Fn<void(bool)> interactionActive,
+		Fn<void()> restoreFocus) {
 	const auto weak = base::make_weak(field);
 	return [=](
 			EditLinkSelection selection,
@@ -491,7 +507,9 @@ Fn<bool(
 			link,
 			std::move(callback),
 			fieldStyle,
-			validateLink));
+			validateLink,
+			interactionActive,
+			restoreFocus));
 		return true;
 	};
 }
@@ -524,7 +542,10 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());
 	field->setMarkdownReplacesEnabled(rpl::single(Ui::MarkdownEnabledState{
-		Ui::MarkdownEnabled{ std::move(args.allowMarkdownTags) }
+		Ui::MarkdownEnabled{
+			std::move(args.allowMarkdownTags),
+			args.allowTypedMarkdown
+		}
 	}));
 	if (const auto &show = args.show) {
 		field->setEditLinkCallback(
@@ -589,7 +610,9 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 			link,
 			std::move(callback),
 			nullptr,
-			validate));
+			validate,
+			nullptr,
+			nullptr));
 		return true;
 	};
 }

@@ -11,7 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Platform {
 
-class TaskbarButtons final {
+class TaskbarButtons final : public base::has_weak_ptr {
 public:
 	TaskbarButtons(not_null<ITaskbarList3*> taskbar, HWND window);
 	~TaskbarButtons();
@@ -35,8 +35,9 @@ private:
 	};
 
 	[[nodiscard]] State currentState() const;
-	void refreshIcons();
+	bool refreshIcons();
 	void destroyIcons();
+	void scheduleApply();
 	void apply(State state, bool create);
 	void updateFromPlayer();
 
@@ -51,6 +52,8 @@ private:
 
 	State _applied;
 	bool _created = false;
+	bool _applying = false;
+	bool _applyScheduled = false;
 
 	rpl::lifetime _lifetime;
 

@@ -1020,6 +1020,14 @@ void OverlayWidget::setupWindow() {
 		} else if (_stories && _stories->ignoreWindowMove(widgetPoint)) {
 		} else if (_sponsoredButton
 			&& _sponsoredButton->geometry().contains(widgetPoint)) {
+		} else if (_showRecognitionResults
+			&& _recognitionResult.success
+			&& !_recognitionResult.items.empty()
+			&& _recognition.positionAt(
+				widgetPoint,
+				finalContentRect(),
+				_rotation,
+				false).item >= 0) {
 		} else if (_windowed) {
 			result |= Flag::Move;
 		}
@@ -2728,7 +2736,7 @@ bool OverlayWidget::radialAnimationCallback(crl::time now) {
 	return true;
 }
 
-void OverlayWidget::zoomIn() {
+void OverlayWidget::zoomIn(std::optional<QPoint> anchor) {
 	auto newZoom = _zoom;
 	const auto full = _fullScreenVideo ? _zoomToScreen : _zoomToDefault;
 	if (newZoom == kZoomToScreenLevel) {
@@ -2742,10 +2750,10 @@ void OverlayWidget::zoomIn() {
 			++newZoom;
 		}
 	}
-	zoomUpdate(newZoom);
+	zoomUpdate(newZoom, anchor);
 }
 
-void OverlayWidget::zoomOut() {
+void OverlayWidget::zoomOut(std::optional<QPoint> anchor) {
 	auto newZoom = _zoom;
 	const auto full = _fullScreenVideo ? _zoomToScreen : _zoomToDefault;
 	if (newZoom == kZoomToScreenLevel) {
@@ -2759,7 +2767,7 @@ void OverlayWidget::zoomOut() {
 			--newZoom;
 		}
 	}
-	zoomUpdate(newZoom);
+	zoomUpdate(newZoom, anchor);
 }
 
 void OverlayWidget::zoomReset() {
@@ -2793,13 +2801,15 @@ void OverlayWidget::zoomReset() {
 	zoomUpdate(newZoom);
 }
 
-void OverlayWidget::zoomUpdate(int32 &newZoom) {
+void OverlayWidget::zoomUpdate(
+		int32 &newZoom,
+		std::optional<QPoint> anchor) {
 	if (newZoom != kZoomToScreenLevel) {
 		while ((newZoom < 0 && (-newZoom + 1) > _w) || (-newZoom + 1) > _h) {
 			++newZoom;
 		}
 	}
-	setZoomLevel(newZoom);
+	setZoomLevel(newZoom, false, anchor);
 }
 
 void OverlayWidget::clearSession() {
@@ -5348,18 +5358,31 @@ void OverlayWidget::flushPendingFrameStep() {
 void OverlayWidget::seekRelativeTime(crl::time time) {
 	Expects(_streamed != nullptr);
 
+	const auto &state = _streamed->instance.info().video.state;
+	const auto position = state.position;
+	const auto duration = state.duration;
+	if (position == kTimeUnknown
+		|| duration == kTimeUnknown
+		|| duration == kDurationUnavailable) {
+		return;
+	}
 	const auto newTime = std::clamp(
-		_streamed->instance.info().video.state.position + time,
+		position + time,
 		crl::time(0),
-		_streamed->instance.info().video.state.duration);
+		duration);
 	restartAtSeekPosition(newTime);
 }
 
 void OverlayWidget::restartAtProgress(float64 progress) {
 	Expects(_streamed != nullptr);
 
-	restartAtSeekPosition(_streamed->instance.info().video.state.duration
-		* std::clamp(progress, 0., 1.));
+	const auto duration = _streamed->instance.info().video.state.duration;
+	if (duration == kTimeUnknown
+		|| duration == kDurationUnavailable) {
+		return;
+	}
+	restartAtSeekPosition(
+		duration * std::clamp(progress, 0., 1.));
 }
 
 void OverlayWidget::restartAtSeekPosition(crl::time position) {
@@ -5874,8 +5897,8 @@ void OverlayWidget::refreshSystemMediaControls() {
 	auto video = SystemMediaControlsVideoSink::VideoState{
 		.title = title,
 		.artist = channel ? filename : _fromName,
-		.position = std::max(crl::time(state.position), crl::time(0)),
-		.duration = std::max(crl::time(state.length), crl::time(0)),
+		.position = std::max(state.position, int64(0)),
+		.duration = std::max(state.length, int64(0)),
 		.playing = (!player.paused() && !player.finished()),
 		.nextAvailable = _rightNavVisible,
 		.previousAvailable = _leftNavVisible,
@@ -7238,19 +7261,20 @@ void OverlayWidget::handleWheelEvent(not_null<QWheelEvent*> e) {
 	const auto acceptForJump = !_stories
 		&& ((e->source() == Qt::MouseEventNotSynthesized)
 			|| (e->source() == Qt::MouseEventSynthesizedBySystem));
+	const auto anchor = zoomAnchor(e->globalPosition());
 	_verticalWheelDelta += angle.y();
 	while (qAbs(_verticalWheelDelta) >= step) {
 		if (_verticalWheelDelta < 0) {
 			_verticalWheelDelta += step;
 			if (e->modifiers().testFlag(Qt::ControlModifier)) {
-				zoomOut();
+				zoomOut(anchor);
 			} else if (acceptForJump) {
 				moveToNext(1);
 			}
 		} else {
 			_verticalWheelDelta -= step;
 			if (e->modifiers().testFlag(Qt::ControlModifier)) {
-				zoomIn();
+				zoomIn(anchor);
 			} else if (acceptForJump) {
 				moveToNext(-1);
 			}
@@ -7327,19 +7351,27 @@ bool OverlayWidget::handleNativeGesture(not_null<QNativeGestureEvent*> e) {
 			base::Platform::Haptic();
 		}
 	};
+	const auto anchor = zoomAnchor(e->globalPos());
 	_pinchZoomAccumulated += e->value();
 	while (_pinchZoomAccumulated >= kPinchZoomStep) {
 		_pinchZoomAccumulated -= kPinchZoomStep;
-		stepZoom([&] { zoomIn(); });
+		stepZoom([&] { zoomIn(anchor); });
 	}
 	while (_pinchZoomAccumulated <= -kPinchZoomStep) {
 		_pinchZoomAccumulated += kPinchZoomStep;
-		stepZoom([&] { zoomOut(); });
+		stepZoom([&] { zoomOut(anchor); });
 	}
 	return true;
 }
 
-void OverlayWidget::setZoomLevel(int newZoom, bool force) {
+QPoint OverlayWidget::zoomAnchor(QPointF globalPosition) const {
+	return _widget->mapFromGlobal(globalPosition.toPoint());
+}
+
+void OverlayWidget::setZoomLevel(
+		int newZoom,
+		bool force,
+		std::optional<QPoint> anchor) {
 	if (_stories
 		|| (!force && _zoom == newZoom)
 		|| (_fullScreenVideo && newZoom != kZoomToScreenLevel)) {
@@ -7351,30 +7383,34 @@ void OverlayWidget::setZoomLevel(int newZoom, bool force) {
 	const auto contentSize = videoShown()
 		? style::ConvertScale(videoSize())
 		: QSize(_width, _height);
+	const auto anchorX = anchor ? float64(anchor->x()) : (width() / 2.);
+	const auto anchorY = anchor
+		? float64(anchor->y())
+		: (_availableHeight / 2.);
 	_oldGeometry = contentGeometry();
 	_geometryAnimation.stop();
 
 	_w = contentSize.width();
 	_h = contentSize.height();
 	if (z >= 0) {
-		nx = (_x - width() / 2.) / (z + 1);
-		ny = (_y - _availableHeight / 2.) / (z + 1);
+		nx = (_x - anchorX) / (z + 1);
+		ny = (_y - anchorY) / (z + 1);
 	} else {
-		nx = (_x - width() / 2.) * (-z + 1);
-		ny = (_y - _availableHeight / 2.) * (-z + 1);
+		nx = (_x - anchorX) * (-z + 1);
+		ny = (_y - anchorY) * (-z + 1);
 	}
 	_zoom = newZoom;
 	z = (_zoom == kZoomToScreenLevel) ? full : _zoom;
 	if (z > 0) {
 		_w = qRound(_w * (z + 1));
 		_h = qRound(_h * (z + 1));
-		_x = qRound(nx * (z + 1) + width() / 2.);
-		_y = qRound(ny * (z + 1) + _availableHeight / 2.);
+		_x = qRound(nx * (z + 1) + anchorX);
+		_y = qRound(ny * (z + 1) + anchorY);
 	} else {
 		_w = qRound(_w / (-z + 1));
 		_h = qRound(_h / (-z + 1));
-		_x = qRound(nx / (-z + 1) + width() / 2.);
-		_y = qRound(ny / (-z + 1) + _availableHeight / 2.);
+		_x = qRound(nx / (-z + 1) + anchorX);
+		_y = qRound(ny / (-z + 1) + anchorY);
 	}
 	snapXY();
 	if (_opengl) {
@@ -8686,6 +8722,7 @@ void OverlayWidget::updateHeader() {
 			}
 		}
 	} else {
+		const auto channel = _peer ? _peer->asChannel() : nullptr;
 		if (_document) {
 			_headerText = _document->filename().isEmpty()
 				? tr::lng_mediaview_doc_image(tr::now)
@@ -8700,8 +8737,10 @@ void OverlayWidget::updateHeader() {
 			} else {
 				_headerText = tr::lng_mediaview_profile_photo(tr::now);
 			}
+		} else if (channel && channel->isCommunity()) {
+			_headerText = tr::lng_mediaview_community_photo(tr::now);
 		} else if ((_history && _history->peer->isBroadcast())
-			|| (_peer && _peer->isChannel() && !_peer->isMegagroup())) {
+			|| (channel && !channel->isMegagroup())) {
 			_headerText = tr::lng_mediaview_channel_photo(tr::now);
 		} else if (_peer) {
 			_headerText = tr::lng_mediaview_group_photo(tr::now);

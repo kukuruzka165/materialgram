@@ -645,6 +645,12 @@ void EmojiListWidget::setupSearch() {
 	}, session, type);
 }
 
+void EmojiListWidget::setSearchRightReserved(int value) {
+	if (_search) {
+		_search->setRightReserved(value);
+	}
+}
+
 rpl::producer<std::vector<QString>> EmojiListWidget::searchQueries() const {
 	return _searchQueries.events();
 }
@@ -1289,6 +1295,15 @@ void EmojiListWidget::fillSelectedSearchShortcut() {
 
 bool EmojiListWidget::searchShortcutsShown() const {
 	return _searchMode && !_searchShortcutSets.empty();
+}
+
+bool EmojiListWidget::canConsumeHorizontalScroll(QPoint position, int) {
+	if (!searchShortcutsShown() || (_searchShortcutsScrollMax <= 0)) {
+		return false;
+	}
+	const auto top = searchShortcutsTop();
+	return (position.y() >= top)
+		&& (position.y() < top + searchShortcutsHeight());
 }
 
 bool EmojiListWidget::searchShortcutSelected() const {

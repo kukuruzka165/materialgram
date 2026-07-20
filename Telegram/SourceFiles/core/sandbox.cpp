@@ -205,7 +205,9 @@ void Sandbox::launchApplication() {
 			OptionDeadlockDetector.changes()
 		) | rpl::on_next([=] {
 			using DeadlockDetector::PingThread;
-			_deadlockDetector = OptionDeadlockDetector.value()
+			// The test agent always wants a stuck main thread to crash with a
+			// report instead of hanging silently, so force it on for -testagent.
+			_deadlockDetector = (OptionDeadlockDetector.value() || cTestAgent())
 				? std::make_unique<PingThread>(this)
 				: nullptr;
 		}, _lifetime);

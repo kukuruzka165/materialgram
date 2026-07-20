@@ -346,6 +346,11 @@ QString PhotoVideoAudioFilesFilter() {
 		+ u" *.mp3 *.m4a *.aac *.ogg *.flac *.opus *.oga)"_q;
 }
 
+QString AudioFilesFilter() {
+	return u"Audio Files (*.mp3 *.m4a *.aac *.ogg *.flac *.opus *.oga);;"_q
+		+ AllFilesFilter();
+}
+
 const QString &Tmp() {
 	static const auto tmp = u"tmp"_q;
 	return tmp;

@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_reply_button.h"
 #include "history/view/reactions/history_view_reactions_selector.h"
 #include "history/view/history_view_context_menu.h"
+#include "history/view/history_view_about_view.h"
 #include "history/view/history_view_drag.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_emoji_interactions.h"
@@ -56,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "ui/layers/generic_box.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
+#include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/toast/toast.h"
@@ -486,6 +488,12 @@ ListWidget::ListWidget(
 	setAttribute(Qt::WA_AcceptTouchEvents);
 	setMouseTracking(true);
 	setAccessibleName(tr::lng_sr_message_list(tr::now));
+	if (const auto scroll = _delegate->listScrollArea()) {
+		scroll->lockWheelDirection();
+		scroll->setCrossAxisWheelProcess([=](QPoint delta) {
+			return consumeScrollAction(delta);
+		});
+	}
 	if (_readMetricsTracker) {
 		Core::App().inAppKeyPressed(
 		) | rpl::on_next([=] {
@@ -760,6 +768,8 @@ void ListWidget::refreshRows(const Data::MessagesSlice &old) {
 		}
 	}
 	_viewsCapacity.clear();
+
+	pruneAccessibilityIdentities();
 
 	const auto markLastAsRead = (scrolledTillEnd && markingMessagesRead());
 	checkUnreadBarCreation(markLastAsRead);
@@ -1336,6 +1346,7 @@ auto ListWidget::collectSelectedItems() const -> SelectedItems {
 		result.canForward = selection.canForward;
 		result.canSendNow = selection.canSendNow;
 		result.canReschedule = selection.canReschedule;
+		result.ephemeral = selection.ephemeral;
 		return result;
 	};
 	auto items = SelectedItems();
@@ -1454,7 +1465,14 @@ bool ListWidget::isGoodForSelection(
 		int &totalCount) const {
 	if (!_delegate->listIsItemGoodForSelection(item)) {
 		return false;
-	} else if (!applyTo.contains(item->fullId())) {
+	}
+	if (!applyTo.empty()) {
+		const auto first = session().data().message(applyTo.begin()->first);
+		if (first && !first->inSameSelectionGroup(item)) {
+			return false;
+		}
+	}
+	if (!applyTo.contains(item->fullId())) {
 		++totalCount;
 	}
 	return (totalCount <= MaxSelectedItems);
@@ -1470,10 +1488,11 @@ bool ListWidget::addToSelection(
 	if (!ok) {
 		return false;
 	}
-	iterator->second.canDelete = item->canDelete();
+	iterator->second.canDelete = item->canDelete() || item->isEphemeral();
 	iterator->second.canForward = item->allowsForward();
 	iterator->second.canSendNow = item->allowsSendNow();
 	iterator->second.canReschedule = item->allowsReschedule();
+	iterator->second.ephemeral = item->isEphemeral();
 	return true;
 }
 
@@ -1609,6 +1628,7 @@ void ListWidget::selectItem(not_null<HistoryItem*> item) {
 			_selected,
 			item,
 			SelectAction::Select);
+		_accessibilitySelectionAnchor = nullptr;
 		pushSelectedItems();
 	}
 }
@@ -1622,6 +1642,7 @@ void ListWidget::selectItemAsGroup(not_null<HistoryItem*> item) {
 			_selected,
 			item,
 			SelectAction::Select);
+		_accessibilitySelectionAnchor = nullptr;
 		pushSelectedItems();
 		update();
 	}
@@ -1631,6 +1652,7 @@ void ListWidget::clearSelected() {
 	if (_selected.empty()) {
 		return;
 	}
+	_accessibilitySelectionAnchor = nullptr;
 	if (hasSelectedText()) {
 		repaintItem(_selected.begin()->first);
 		_selected.clear();
@@ -1788,6 +1810,19 @@ bool ListWidget::canConsumeHorizontalScroll(QPoint position, int delta) const {
 		&& view->canConsumeHorizontalScroll(
 			mapPointToItem(position, view),
 			delta);
+}
+
+bool ListWidget::consumeScrollAction(QPoint delta) {
+	const auto horizontal = (std::abs(delta.x()) > std::abs(delta.y()));
+	if (!horizontal) {
+		return false;
+	}
+	const auto position = mapFromGlobal(_mousePosition);
+	const auto view = lookupItemByY(position.y());
+	return view
+		&& view->consumeHorizontalScroll(
+			mapPointToItem(position, view),
+			delta.x());
 }
 
 auto ListWidget::findViewForPinnedTracking(int top) const
@@ -1955,6 +1990,11 @@ SelectionModeResult ListWidget::elementInSelectionMode(
 		const HistoryView::Element *view) {
 	if (view && !_delegate->listIsItemGoodForSelection(view->data())) {
 		return {};
+	} else if (view && !_selected.empty()) {
+		const auto first = session().data().message(_selected.begin()->first);
+		if (first && !first->inSameSelectionGroup(view->data())) {
+			return {};
+		}
 	}
 	return inSelectionMode();
 }
@@ -2079,7 +2119,7 @@ void ListWidget::elementShowHiddenSenderTooltip(
 			}
 		}
 	}
-	_hiddenSenderTooltip.show(scroll, area, text);
+	_hiddenSenderTooltip.show(scroll, scroll->scrolls(), area, text);
 }
 
 bool ListWidget::elementAnimationsPaused() {
@@ -2346,6 +2386,17 @@ int ListWidget::resizeGetHeight(int newWidth) {
 	_itemsTop = (_minHeight > _itemsHeight + st::historyPaddingBottom)
 		? (_minHeight - _itemsHeight - st::historyPaddingBottom)
 		: 0;
+	if (const auto about = _delegate->listAboutView()) {
+		if (const auto view = about->view()) {
+			about->height = view->resizeGetHeight(newWidth);
+			_itemsTop = std::max(_itemsTop, about->height);
+			about->top = std::min(
+				_itemsTop - about->height,
+				std::max(0, (_minHeight - about->height) / 2));
+		} else {
+			about->top = about->height = 0;
+		}
+	}
 	if (_emptyInfo) {
 		_emptyInfo->setVisible(isEmpty());
 	}
@@ -2523,6 +2574,17 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 
 	auto context = preparePaintContext(clip);
 	context.highlightPathCache = &_highlightPathCache;
+	if (const auto about = _delegate->listAboutView()) {
+		if (const auto view = about->view()) {
+			const auto top = about->top;
+			if (clip.y() < top + about->height
+				&& clip.y() + clip.height() > top) {
+				p.translate(0, top);
+				view->draw(p, context.translated(0, -top));
+				p.translate(0, -top);
+			}
+		}
+	}
 	if (from == end(_items)) {
 		_delegate->listPaintEmpty(p, context);
 		return;
@@ -2808,12 +2870,15 @@ void ListWidget::applyDragSelection() {
 
 void ListWidget::applyDragSelection(SelectedMap &applyTo) const {
 	if (_dragSelectAction == DragSelectAction::Selecting) {
+		auto already = int(applyTo.size());
 		for (const auto &itemId : _dragSelected) {
 			if (applyTo.size() >= MaxSelectedItems) {
 				break;
 			} else if (!applyTo.contains(itemId)) {
 				if (const auto item = session().data().message(itemId)) {
-					addToSelection(applyTo, item);
+					if (isGoodForSelection(applyTo, item, already)) {
+						addToSelection(applyTo, item);
+					}
 				}
 			}
 		}
@@ -2981,9 +3046,9 @@ auto ListWidget::countScrollState() const -> ScrollTopState {
 
 void ListWidget::keyPressEvent(QKeyEvent *e) {
 	const auto key = e->key();
-	const auto hasModifiers = (Qt::NoModifier !=
-		(e->modifiers()
-			& ~(Qt::KeypadModifier | Qt::GroupSwitchModifier)));
+	const auto modifiers = e->modifiers()
+		& ~(Qt::KeypadModifier | Qt::GroupSwitchModifier);
+	const auto hasModifiers = (modifiers != Qt::NoModifier);
 	if (_middleClickAutoscroll.active() && key == Qt::Key_Escape) {
 		_middleClickAutoscroll.stop();
 		return;
@@ -2991,26 +3056,27 @@ void ListWidget::keyPressEvent(QKeyEvent *e) {
 
 	const auto count = accessibilityChildCount();
 	if (count > 0 && Ui::ScreenReaderModeActive()) {
-		if (_accessibilityFocusedItem
-			&& _accessibilityFocusedIndex >= 0) {
+		if (_accessibilityFocusedItem) {
 			const auto elements = accessibleElements();
 			const auto barIndex
 				= accessibilityUnreadBarIndex();
-			const auto elementIndex = (barIndex >= 0
-				&& _accessibilityFocusedIndex > barIndex)
-				? (_accessibilityFocusedIndex - 1)
-				: _accessibilityFocusedIndex;
-			if (elementIndex < 0
-				|| elementIndex >= int(elements.size())
-				|| elements[elementIndex]->data().get()
-					!= _accessibilityFocusedItem) {
+			if (accessibilityItemAtIndex(
+					_accessibilityFocusedIndex,
+					elements,
+					barIndex) != _accessibilityFocusedItem) {
 				// The focused item is still the same message, but
 				// its index in accessibleElements() shifted (the list
-				// was mutated since the last navigation). Repair the
-				// cached index in-place without emitting a focus
-				// change — the framework still thinks the focused
-				// child is _accessibilityFocusedItem and we are only
-				// catching up our bookkeeping.
+				// was mutated since the last navigation, possibly by
+				// an unread bar appearing right at the cached index).
+				// Repair the cached index in-place without emitting a
+				// focus change — the framework still thinks the
+				// focused child is _accessibilityFocusedItem and we
+				// are only catching up our bookkeeping. If the item
+				// is not in the loaded slice anymore the index is
+				// invalidated instead: selection and media actions
+				// dispatch by index, and a stale one would silently
+				// operate on whatever unrelated row occupies it now.
+				_accessibilityFocusedIndex = -1;
 				for (auto i = 0, n = int(elements.size());
 					i < n; ++i) {
 					if (elements[i]->data().get()
@@ -3023,44 +3089,66 @@ void ListWidget::keyPressEvent(QKeyEvent *e) {
 					}
 				}
 			}
+		} else if (_accessibilityFocusedIndex >= 0) {
+			// A nonnegative index with no cached item means the unread
+			// bar was focused. Follow the bar to wherever it sits now
+			// (rows inserted or removed above shift its index), or
+			// invalidate the focus when the bar is gone: the row that
+			// occupies the old index was never announced to the user.
+			_accessibilityFocusedIndex = accessibilityUnreadBarIndex();
 		}
+		const auto plainKey = (modifiers == Qt::NoModifier);
+		const auto shiftRange = (modifiers == Qt::ShiftModifier)
+			&& (key == Qt::Key_Up || key == Qt::Key_Down);
 		auto newIndex = _accessibilityFocusedIndex;
 		switch (key) {
 		case Qt::Key_Down:
-			newIndex = std::min(
-				(newIndex < 0) ? (count - 1) : (newIndex + 1),
-				count - 1);
+			if (plainKey || shiftRange) {
+				newIndex = std::min(
+					(newIndex < 0) ? (count - 1) : (newIndex + 1),
+					count - 1);
+			}
 			break;
 		case Qt::Key_Up:
-			newIndex = std::max(
-				(newIndex < 0) ? (count - 1) : (newIndex - 1),
-				0);
+			if (plainKey || shiftRange) {
+				newIndex = std::max(
+					(newIndex < 0) ? (count - 1) : (newIndex - 1),
+					0);
+			}
 			break;
 		case Qt::Key_PageDown: {
-			const auto pageHeight = _visibleBottom - _visibleTop;
-			auto remaining = pageHeight;
-			while (newIndex + 1 < count && remaining > 0) {
-				++newIndex;
-				const auto rect = accessibilityChildRect(newIndex);
-				remaining -= rect.height();
+			if (plainKey) {
+				const auto pageHeight = _visibleBottom - _visibleTop;
+				auto remaining = pageHeight;
+				while (newIndex + 1 < count && remaining > 0) {
+					++newIndex;
+					const auto rect = accessibilityChildRect(newIndex);
+					remaining -= rect.height();
+				}
 			}
 			break;
 		}
 		case Qt::Key_PageUp: {
-			const auto pageHeight = _visibleBottom - _visibleTop;
-			auto remaining = pageHeight;
-			while (newIndex - 1 >= 0 && remaining > 0) {
-				--newIndex;
-				const auto rect = accessibilityChildRect(newIndex);
-				remaining -= rect.height();
+			if (plainKey) {
+				const auto pageHeight = _visibleBottom - _visibleTop;
+				auto remaining = pageHeight;
+				while (newIndex - 1 >= 0 && remaining > 0) {
+					--newIndex;
+					const auto rect = accessibilityChildRect(newIndex);
+					remaining -= rect.height();
+				}
 			}
 			break;
 		}
 		case Qt::Key_Home:
-			newIndex = 0;
+			if (plainKey) {
+				newIndex = 0;
+			}
 			break;
 		case Qt::Key_End:
-			newIndex = count - 1;
+			if (plainKey) {
+				newIndex = count - 1;
+			}
 			break;
 		default:
 			break;
@@ -3071,14 +3159,17 @@ void ListWidget::keyPressEvent(QKeyEvent *e) {
 			const auto elements = accessibleElements();
 			const auto barIndex
 				= accessibilityUnreadBarIndex();
-			const auto elementIndex = (barIndex >= 0
-				&& newIndex > barIndex)
-				? (newIndex - 1)
-				: newIndex;
-			const auto item = (elementIndex >= 0
-				&& elementIndex < int(elements.size()))
-				? elements[elementIndex]->data().get()
-				: nullptr;
+			const auto item = accessibilityItemAtIndex(
+				newIndex,
+				elements,
+				barIndex);
+			if (shiftRange) {
+				extendAccessibilitySelection(
+					_accessibilityFocusedIndex,
+					newIndex);
+			} else {
+				_accessibilitySelectionAnchor = nullptr;
+			}
 			setAccessibilityFocusedItem(newIndex, item);
 
 			const auto rect = accessibilityChildRect(newIndex);
@@ -3092,26 +3183,40 @@ void ListWidget::keyPressEvent(QKeyEvent *e) {
 				}
 			}
 
-			if (markingMessagesRead()
-				&& (barIndex < 0 || newIndex != barIndex)
-				&& elementIndex >= 0
-				&& elementIndex < int(elements.size())) {
-				_delegate->listMarkReadTill(
-					elements[elementIndex]->data());
+			if (markingMessagesRead() && item) {
+				_delegate->listMarkReadTill(item);
 			}
 
 			e->accept();
 			return;
 		}
 
-		if (key == Qt::Key_Space) {
-			if (hasSelectedItems()) {
-				toggleMessageSelection();
-			} else {
-				playPauseFocusedMedia();
-			}
+		if (shiftRange) {
 			e->accept();
 			return;
+		}
+
+		if (key == Qt::Key_Space) {
+			// Ctrl+Space toggles selection of the focused message and
+			// thereby enters "selection mode". While any message stays
+			// selected, plain Space keeps toggling (mirroring how mouse
+			// clicks work for sighted users once selection is active);
+			// with nothing selected it plays/pauses the focused media.
+			if (modifiers == Qt::ControlModifier) {
+				_accessibilitySelectionAnchor = nullptr;
+				toggleMessageSelection();
+				e->accept();
+				return;
+			} else if (modifiers == Qt::NoModifier) {
+				if (hasSelectedItems()) {
+					_accessibilitySelectionAnchor = nullptr;
+					toggleMessageSelection();
+				} else {
+					playPauseFocusedMedia();
+				}
+				e->accept();
+				return;
+			}
 		}
 	}
 
@@ -3181,7 +3286,9 @@ void ListWidget::mouseDoubleClickEvent(QMouseEvent *e) {
 			|| _mouseCursorState == CursorState::Date)
 		&& _selected.empty()
 		&& _overElement
-		&& _overElement->data()->isRegular()) {
+		&& (_overElement->data()->isRegular()
+			|| (_overElement->data()->isEphemeral()
+				&& !_overElement->data()->out()))) {
 		mouseActionCancel();
 		switch (CurrentQuickAction()) {
 		case DoubleClickQuickAction::Reply: {
@@ -3298,12 +3405,14 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		&& overItem) {
 		if (const auto view = viewForItem(overItem)) {
 			const auto rightSize = view->rightActionSize().value_or(QSize());
+			const auto parameters = view->reactionButtonParameters({}, {});
 			const auto reactionsSkip = view->embedReactionsInBubble()
 				? 0
-				: view->reactionButtonParameters({}, {}).reactionsHeight;
+				: parameters.reactionsHeight;
 			const auto top = itemTop(view)
 				+ view->height()
 				- reactionsSkip
+				- parameters.keyboardHeight
 				- _visibleTop
 				- rightSize.height();
 			const auto right = rect::right(view->innerGeometry())
@@ -4188,6 +4297,9 @@ void ListWidget::mouseActionFinish(
 			}
 		}
 	}
+	// A mouse action replaces whatever range the keyboard was building,
+	// the next Shift+arrow re-anchors at the focused row.
+	_accessibilitySelectionAnchor = nullptr;
 	_mouseAction = MouseAction::None;
 	_mouseSelectType = TextSelectType::Letters;
 	_mouseTextAnchor = TextState();
@@ -4650,7 +4762,9 @@ void ListWidget::setupThanosEffect() {
 				return preparePaintContext(clip);
 			},
 			.window = [=]() -> QWidget* { return window(); },
-			.scrollArea = [=]() -> not_null<Ui::ScrollArea*> {
+			.scrollTop = [=] { return scroll->scrollTop(); },
+			.scrollTopMax = [=] { return scroll->scrollTopMax(); },
+			.scrollWidget = [=]() -> not_null<QWidget*> {
 				return scroll;
 			},
 			.scrollToY = [=](int y) {
@@ -4879,7 +4993,12 @@ void ListWidget::itemRemoved(not_null<const HistoryItem*> item) {
 	}
 	if (_accessibilityFocusedItem == item) {
 		_accessibilityFocusedItem = nullptr;
+		_accessibilityFocusedIndex = -1;
 	}
+	if (_accessibilitySelectionAnchor == item) {
+		_accessibilitySelectionAnchor = nullptr;
+	}
+	_accessibilityIdentities.remove(item);
 	const auto i = _views.find(item);
 	if (i == end(_views)) {
 		return;
@@ -4979,7 +5098,9 @@ void ListWidget::replyNextMessage(FullMsgId fullId, bool next) {
 	const auto reply = [&](Element *view) {
 		if (view) {
 			const auto newFullId = view->data()->fullId();
-			if (!view->data()->isRegular()) {
+			if (!view->data()->isRegular()
+				&& (!view->data()->isEphemeral()
+					|| view->data()->out())) {
 				return replyNextMessage(newFullId, next);
 			}
 			replyToMessageRequestNotify({ newFullId });
@@ -5064,6 +5185,24 @@ int ListWidget::accessibilityUnreadBarIndex() const {
 	return -1;
 }
 
+HistoryItem *ListWidget::accessibilityItemAtIndex(
+		int index,
+		const std::vector<Element*> &elements,
+		int barIndex) const {
+	// The unread bar row maps to no item: a focused bar is cached as
+	// a null item with a nonnegative index, so it can never be
+	// mistaken for the message it is anchored to when rows shift.
+	if (index < 0 || (barIndex >= 0 && index == barIndex)) {
+		return nullptr;
+	}
+	const auto elementIndex = (barIndex >= 0 && index > barIndex)
+		? (index - 1)
+		: index;
+	return (elementIndex < int(elements.size()))
+		? elements[elementIndex]->data().get()
+		: nullptr;
+}
+
 auto ListWidget::computeActiveColumns(int row) const
 -> const std::vector<HistoryView::MessageSubItem> & {
 	const auto barIndex = accessibilityUnreadBarIndex();
@@ -5113,50 +5252,121 @@ void ListWidget::announceAccessibilityFocus(int index) {
 }
 
 void ListWidget::toggleMessageSelection() {
-	if (!hasSelectedItems() || _accessibilityFocusedIndex < 0) {
-		return;
-	}
+	changeAccessibilitySelection(
+		_accessibilityFocusedIndex,
+		SelectAction::Invert);
+}
+
+void ListWidget::changeAccessibilitySelection(
+		int index,
+		SelectAction action) {
 	const auto barIndex = accessibilityUnreadBarIndex();
-	if (barIndex >= 0 && _accessibilityFocusedIndex == barIndex) {
+	if (index < 0 || (barIndex >= 0 && index == barIndex)) {
 		return;
 	}
 	const auto elements = accessibleElements();
-	const auto elementIndex = (barIndex >= 0
-		&& _accessibilityFocusedIndex > barIndex)
-		? (_accessibilityFocusedIndex - 1)
-		: _accessibilityFocusedIndex;
+	const auto elementIndex = (barIndex >= 0 && index > barIndex)
+		? (index - 1)
+		: index;
 	if (elementIndex < 0 || elementIndex >= int(elements.size())) {
 		return;
 	}
 	const auto view = elements[elementIndex];
 	const auto item = view->data();
+	// Growing the selection respects the same restrictions the mouse
+	// paths check; deselecting an already selected message stays
+	// possible even after a restriction became active, matching them.
+	const auto selecting = (action == SelectAction::Select)
+		|| ((action == SelectAction::Invert)
+			&& !isSelectedAsGroup(_selected, item));
+	if (selecting && (!_selectEnabled || hasSelectRestriction())) {
+		return;
+	}
+	// Detect the change by container size, not by the group membership
+	// flip: deselecting a partially selected album really mutates the
+	// selection while isSelectedAsGroup() stays false both before and
+	// after. Selection changes here are pure adds or removes, so an
+	// unchanged size means nothing changed and no repaint, top bar
+	// update or announcement is due.
+	const auto sizeBefore = _selected.size();
+	changeSelectionAsGroup(_selected, item, action);
+	if (_selected.size() == sizeBefore) {
+		return;
+	}
 	clearTextSelection();
-	changeSelectionAsGroup(_selected, item, SelectAction::Invert);
 	repaintItem(view);
 	pushSelectedItems();
-	accessibilityChildStateChanged(
-		_accessibilityFocusedIndex,
-		{ .selected = true });
-	accessibilityChildNameChanged(_accessibilityFocusedIndex);
+	accessibilityChildStateChanged(index, { .selected = true });
+	accessibilityChildNameChanged(index);
+}
+
+void ListWidget::extendAccessibilitySelection(
+		int oldIndex,
+		int newIndex) {
+	// Windows-Explorer-style Shift+arrow range selection. The anchor is
+	// the row the current range grows from: re-established here whenever
+	// it is missing, no longer listed or the selection is empty, so an
+	// interrupted or cancelled range simply starts a fresh one at the
+	// focused row. Growing away from the anchor selects the row being
+	// entered (and the origin row on the first step), stepping back
+	// towards it deselects the row being left.
+	const auto elements = accessibleElements();
+	const auto barIndex = accessibilityUnreadBarIndex();
+	const auto itemAt = [&](int index) {
+		return accessibilityItemAtIndex(index, elements, barIndex);
+	};
+	if (oldIndex < 0) {
+		_accessibilitySelectionAnchor = itemAt(newIndex);
+		changeAccessibilitySelection(newIndex, SelectAction::Select);
+		return;
+	}
+	auto anchorIndex = -1;
+	if (_accessibilitySelectionAnchor && hasSelectedItems()) {
+		for (auto i = 0, n = int(elements.size()); i != n; ++i) {
+			if (elements[i]->data().get()
+				== _accessibilitySelectionAnchor) {
+				anchorIndex = (barIndex >= 0 && i >= barIndex)
+					? (i + 1)
+					: i;
+				break;
+			}
+		}
+	}
+	if (anchorIndex < 0) {
+		_accessibilitySelectionAnchor = itemAt(oldIndex);
+		if (!_accessibilitySelectionAnchor) {
+			// Re-anchoring on the unread-bar row (it has no item): anchor
+			// to the row being entered instead, so the next Shift+arrow
+			// can resolve the anchor and shrink the range. Leaving the
+			// anchor null here would make every following step re-anchor
+			// at its own old index and always read as growing.
+			_accessibilitySelectionAnchor = itemAt(newIndex);
+		}
+		anchorIndex = oldIndex;
+	}
+	const auto growing = std::abs(newIndex - anchorIndex)
+		> std::abs(oldIndex - anchorIndex);
+	if (growing) {
+		if (oldIndex == anchorIndex) {
+			changeAccessibilitySelection(
+				oldIndex,
+				SelectAction::Select);
+		}
+		changeAccessibilitySelection(newIndex, SelectAction::Select);
+	} else {
+		changeAccessibilitySelection(oldIndex, SelectAction::Deselect);
+	}
 }
 
 void ListWidget::playPauseFocusedMedia() {
-	if (_accessibilityFocusedIndex < 0) {
-		return;
-	}
-	const auto barIndex = accessibilityUnreadBarIndex();
-	if (barIndex >= 0 && _accessibilityFocusedIndex == barIndex) {
-		return;
-	}
 	const auto elements = accessibleElements();
-	const auto elementIndex = (barIndex >= 0
-		&& _accessibilityFocusedIndex > barIndex)
-		? (_accessibilityFocusedIndex - 1)
-		: _accessibilityFocusedIndex;
-	if (elementIndex < 0 || elementIndex >= int(elements.size())) {
+	const auto item = accessibilityItemAtIndex(
+		_accessibilityFocusedIndex,
+		elements,
+		accessibilityUnreadBarIndex());
+	if (!item) {
 		return;
 	}
-	const auto item = elements[elementIndex]->data();
 	if (const auto media = item->media()) {
 		if (const auto document = media->document()) {
 			if (document->isVoiceMessage()
@@ -5193,6 +5403,18 @@ QString ListWidget::accessibilityChildName(int index) const {
 	return HistoryView::MessageAccessibilityName(
 		view,
 		view->data()->history());
+}
+
+Ui::AccessibilityState ListWidget::accessibilityState() const {
+	// The list allows selecting multiple messages (Ctrl+Space, plain
+	// Space while the selection is not empty, Shift+arrows for ranges)
+	// and the selection may be emptied again, so the UIA selection
+	// pattern must report CanSelectMultiple and must not claim
+	// IsSelectionRequired once something got selected.
+	return {
+		.extSelectable = true,
+		.multiSelectable = true,
+	};
 }
 
 QAccessible::State ListWidget::accessibilityChildState(int index) const {
@@ -5344,11 +5566,21 @@ void ListWidget::focusInEvent(QFocusEvent *e) {
 				return;
 			}
 			// The cached focused item is no longer in the list (it
-			// was removed since we last had focus). Clear the cache
-			// in-place and fall through to the index-still-valid /
-			// auto-select branches below — those will pick a new
-			// focus target and emit the announcement.
+			// was removed or fell out of the loaded slice since we
+			// last had focus). Invalidate the index together with the
+			// item: announcing whatever row occupies the old index
+			// would leave later actions bound to a row the user never
+			// heard about once the list shifts again. The auto-select
+			// branch below establishes a fresh focus instead.
 			_accessibilityFocusedItem = nullptr;
+			_accessibilityFocusedIndex = -1;
+		} else if (_accessibilityFocusedIndex >= 0) {
+			// A nonnegative index with no cached item means the unread
+			// bar was focused. Follow the bar to wherever it sits now,
+			// or fall through to pick a fresh focus target when it is
+			// gone: the row that occupies the old index was never
+			// announced to the user.
+			_accessibilityFocusedIndex = accessibilityUnreadBarIndex();
 		}
 		if (_accessibilityFocusedIndex >= 0
 			&& _accessibilityFocusedIndex < count) {
@@ -5360,15 +5592,164 @@ void ListWidget::focusInEvent(QFocusEvent *e) {
 			? (barIndex + 1)
 			: (count - 1);
 		const auto elements = accessibleElements();
-		const auto elementIndex = (barIndex >= 0
-			&& index > barIndex)
-			? (index - 1)
-			: index;
-		const auto item = (elementIndex >= 0
-			&& elementIndex < int(elements.size()))
-			? elements[elementIndex]->data().get()
-			: nullptr;
+		const auto item = accessibilityItemAtIndex(
+			index,
+			elements,
+			barIndex);
 		setAccessibilityFocusedItem(index, item);
+	});
+}
+
+bool ListWidget::accessibilityChildSupportsActions(int index) const {
+	// Every message row can be focused and activated and has a stable
+	// identity below. Tying the opt-in to a valid identity keeps the
+	// action interface off invalid indices and off the unread bar row,
+	// which has no meaningful press action.
+	return accessibilityChildIdentity(index) != 0;
+}
+
+quintptr ListWidget::accessibilityChildIdentity(int index) const {
+	// Child indices shift whenever messages are inserted or removed and
+	// the unread bar appears or goes away, so a queued action must not
+	// be dispatched by index. A raw HistoryItem pointer is not a safe
+	// token either: items are destroyed all the time and a new message
+	// can be allocated at the same address, silently rebinding a stale
+	// provider to an unrelated row (ABA). So the first request issues
+	// the item a token from a monotonic counter; itemRemoved() erases
+	// the pointer->token entry, and an item reusing the address gets a
+	// fresh token, so stale identities resolve to nothing. The unread
+	// bar row deliberately has no identity (and no action interface).
+	const auto barIndex = accessibilityUnreadBarIndex();
+	if (barIndex >= 0 && index == barIndex) {
+		return 0;
+	}
+	const auto elements = accessibleElements();
+	const auto elementIndex = (barIndex >= 0 && index > barIndex)
+		? (index - 1)
+		: index;
+	if (elementIndex < 0 || elementIndex >= int(elements.size())) {
+		return 0;
+	}
+	const auto item = elements[elementIndex]->data();
+	const auto i = _accessibilityIdentities.find(item);
+	if (i != _accessibilityIdentities.end()) {
+		return i->second;
+	}
+	const auto token = ++_accessibilityIdentityCounter;
+	_accessibilityIdentities.emplace(item, token);
+	return token;
+}
+
+int ListWidget::accessibilityChildIndexByIdentity(
+		quintptr identity) const {
+	// One pass over the elements looking each item up in the issued
+	// tokens map: only an item that was already handed out a token can
+	// match, so rows never seen by the accessibility layer just do not
+	// compare equal.
+	if (!identity) {
+		return -1;
+	}
+	const auto elements = accessibleElements();
+	const auto barIndex = accessibilityUnreadBarIndex();
+	for (auto i = 0, n = int(elements.size()); i != n; ++i) {
+		const auto j = _accessibilityIdentities.find(
+			elements[i]->data());
+		if (j != _accessibilityIdentities.end()
+			&& j->second == identity) {
+			return (barIndex >= 0 && i >= barIndex) ? (i + 1) : i;
+		}
+	}
+	return -1;
+}
+
+void ListWidget::pruneAccessibilityIdentities() {
+	// Items usually outlive their views by the whole session, so with
+	// the identities erased only in itemRemoved() the map would keep an
+	// entry for every row the accessibility layer ever touched while
+	// the slice window scrolls by. Once an item loses its view it is
+	// no longer exposed as an accessibility child, so drop its token:
+	// tokens are never reused, which means an identity the assistive
+	// technology still holds simply stops resolving, exactly as if the
+	// item was removed. Items with views keep their tokens (reissuing
+	// one would invalidate the provider of a live row), and so does the
+	// accessibility-focused item, whose identity must survive scrolling
+	// away and back.
+	for (auto i = begin(_accessibilityIdentities)
+		; i != end(_accessibilityIdentities);) {
+		const auto item = i->first.get();
+		if (item != _accessibilityFocusedItem && !viewForItem(item)) {
+			i = _accessibilityIdentities.erase(i);
+		} else {
+			++i;
+		}
+	}
+}
+
+void ListWidget::applyAccessibilityFocus(
+		int index,
+		bool announceAlways) {
+	const auto elements = accessibleElements();
+	const auto barIndex = accessibilityUnreadBarIndex();
+	const auto item = accessibilityItemAtIndex(index, elements, barIndex);
+	const auto changed = (_accessibilityFocusedIndex != index)
+		|| (_accessibilityFocusedItem != item);
+	_accessibilitySelectionAnchor = nullptr;
+	_accessibilityFocusedIndex = index;
+	_accessibilityFocusedItem = item;
+	// Exactly one announcement: directly when the widget already has
+	// focus, via focusInEvent when keyboard focus is being taken.
+	if (hasFocus()) {
+		if (changed || announceAlways) {
+			announceAccessibilityFocus(index);
+		}
+	} else {
+		setFocus();
+	}
+	const auto rect = accessibilityChildRect(index);
+	if (!rect.isEmpty()) {
+		if (rect.top() < _visibleTop) {
+			_delegate->listScrollTo(rect.top());
+		} else if (rect.bottom() > _visibleBottom) {
+			_delegate->listScrollTo(rect.bottom()
+				- (_visibleBottom - _visibleTop));
+		}
+	}
+	if (markingMessagesRead() && item) {
+		_delegate->listMarkReadTill(item);
+	}
+}
+
+void ListWidget::accessibilityChildSetFocus(quintptr identity) {
+	// UIA invokes provider actions (SetFocus) on a background thread, so
+	// hop to the main thread before touching any widget state. Resolve
+	// the stable identity to its current index here (not on the
+	// background thread) so a list mutation does not move focus to
+	// another row.
+	crl::on_main(this, [=] {
+		// An explicit accessibility SetFocus is itself sufficient
+		// authorization, so we do not gate it on the screen-reader-mode
+		// detector: the UIA provider already reported success to the
+		// caller, and the detector may still be false during startup or
+		// for valid clients that are not on its allowlist.
+		const auto index = accessibilityChildIndexByIdentity(identity);
+		if (index < 0) {
+			return;
+		}
+		applyAccessibilityFocus(index, true);
+	});
+}
+
+void ListWidget::accessibilityChildActivate(quintptr identity) {
+	// A mouse click on a message body performs no action, so Invoke
+	// mirrors the click and only takes the accessibility focus onto the
+	// row. Same background-thread hop and identity resolution as
+	// SetFocus above.
+	crl::on_main(this, [=] {
+		const auto index = accessibilityChildIndexByIdentity(identity);
+		if (index < 0) {
+			return;
+		}
+		applyAccessibilityFocus(index, true);
 	});
 }
 
@@ -5379,6 +5760,20 @@ void ConfirmDeleteSelectedItems(not_null<ListWidget*> widget) {
 	}
 	const auto controller = widget->controller();
 	const auto owner = &controller->session().data();
+	if (items.front().ephemeral) {
+		auto ephemeralItems = std::vector<not_null<HistoryItem*>>();
+		ephemeralItems.reserve(items.size());
+		for (const auto &item : items) {
+			if (const auto i = owner->message(item.msgId)) {
+				ephemeralItems.push_back(i);
+			}
+		}
+		ConfirmDeleteSelectedEphemeral(
+			controller->uiShow(),
+			std::move(ephemeralItems),
+			crl::guard(widget, [=] { widget->cancelSelection(); }));
+		return;
+	}
 	auto historyItems = std::vector<not_null<HistoryItem*>>();
 	historyItems.reserve(items.size());
 	for (const auto &item : items) {

@@ -18,16 +18,19 @@ const auto kIcons = std::vector<FilterIcons>{
 	{
 		&st::foldersCat,
 		&st::foldersCatActive,
+		&st::foldersTabsCat,
 		"\xF0\x9F\x90\xB1"_cs.utf16()
 	},
 	{
 		&st::foldersBook,
 		&st::foldersBookActive,
+		&st::foldersTabsBook,
 		"\xF0\x9F\x93\x95"_cs.utf16()
 	},
 	{
 		&st::foldersMoney,
 		&st::foldersMoneyActive,
+		&st::foldersTabsMoney,
 		"\xF0\x9F\x92\xB0"_cs.utf16()
 	},
 	//{
@@ -38,6 +41,7 @@ const auto kIcons = std::vector<FilterIcons>{
 	{
 		&st::foldersGame,
 		&st::foldersGameActive,
+		&st::foldersTabsGame,
 		"\xF0\x9F\x8E\xAE"_cs.utf16()
 	},
 	//{
@@ -48,11 +52,13 @@ const auto kIcons = std::vector<FilterIcons>{
 	{
 		&st::foldersLight,
 		&st::foldersLightActive,
+		&st::foldersTabsLight,
 		"\xF0\x9F\x92\xA1"_cs.utf16()
 	},
 	{
 		&st::foldersLike,
 		&st::foldersLikeActive,
+		&st::foldersTabsLike,
 		"\xF0\x9F\x91\x8C"_cs.utf16()
 	},
 	//{
@@ -63,36 +69,43 @@ const auto kIcons = std::vector<FilterIcons>{
 	{
 		&st::foldersNote,
 		&st::foldersNoteActive,
+		&st::foldersTabsNote,
 		"\xF0\x9F\x8E\xB5"_cs.utf16()
 	},
 	{
 		&st::foldersPalette,
 		&st::foldersPaletteActive,
+		&st::foldersTabsPalette,
 		"\xF0\x9F\x8E\xA8"_cs.utf16()
 	},
 	{
 		&st::foldersTravel,
 		&st::foldersTravelActive,
+		&st::foldersTabsTravel,
 		"\xE2\x9C\x88\xEF\xB8\x8F"_cs.utf16()
 	},
 	{
 		&st::foldersSport,
 		&st::foldersSportActive,
+		&st::foldersTabsSport,
 		"\xE2\x9A\xBD\xEF\xB8\x8F"_cs.utf16()
 	},
 	{
 		&st::foldersFavorite,
 		&st::foldersFavoriteActive,
+		&st::foldersTabsFavorite,
 		"\xE2\xAD\x90"_cs.utf16()
 	},
 	{
 		&st::foldersStudy,
 		&st::foldersStudyActive,
+		&st::foldersTabsStudy,
 		"\xF0\x9F\x8E\x93"_cs.utf16()
 	},
 	{
 		&st::foldersAirplane,
 		&st::foldersAirplaneActive,
+		&st::foldersTabsAirplane,
 		"\xF0\x9F\x9B\xAB"_cs.utf16()
 	},
 	//{
@@ -108,21 +121,25 @@ const auto kIcons = std::vector<FilterIcons>{
 	{
 		&st::foldersPrivate,
 		&st::foldersPrivateActive,
+		&st::foldersTabsPrivate,
 		"\xF0\x9F\x91\xA4"_cs.utf16()
 	},
 	{
 		&st::foldersGroups,
 		&st::foldersGroupsActive,
+		&st::foldersTabsGroups,
 		"\xF0\x9F\x91\xA5"_cs.utf16()
 	},
 	{
 		&st::foldersAll,
 		&st::foldersAllActive,
+		&st::foldersTabsAll,
 		"\xF0\x9F\x92\xAC"_cs.utf16()
 	},
 	{
 		&st::foldersUnread,
 		&st::foldersUnreadActive,
+		&st::foldersTabsUnread,
 		"\xE2\x9C\x85"_cs.utf16()
 	},
 	//{
@@ -133,6 +150,7 @@ const auto kIcons = std::vector<FilterIcons>{
 	{
 		&st::foldersBots,
 		&st::foldersBotsActive,
+		&st::foldersTabsBots,
 		"\xF0\x9F\xA4\x96"_cs.utf16()
 	},
 	//{
@@ -143,61 +161,73 @@ const auto kIcons = std::vector<FilterIcons>{
 	{
 		&st::foldersCrown,
 		&st::foldersCrownActive,
+		&st::foldersTabsCrown,
 		"\xF0\x9F\x91\x91"_cs.utf16()
 	},
 	{
 		&st::foldersFlower,
 		&st::foldersFlowerActive,
+		&st::foldersTabsFlower,
 		"\xF0\x9F\x8C\xB9"_cs.utf16()
 	},
 	{
 		&st::foldersHome,
 		&st::foldersHomeActive,
+		&st::foldersTabsHome,
 		"\xF0\x9F\x8F\xA0"_cs.utf16()
 	},
 	{
 		&st::foldersLove,
 		&st::foldersLoveActive,
+		&st::foldersTabsLove,
 		"\xE2\x9D\xA4"_cs.utf16()
 	},
 	{
 		&st::foldersMask,
 		&st::foldersMaskActive,
+		&st::foldersTabsMask,
 		"\xF0\x9F\x8E\xAD"_cs.utf16()
 	},
 	{
 		&st::foldersParty,
 		&st::foldersPartyActive,
+		&st::foldersTabsParty,
 		"\xF0\x9F\x8D\xB8"_cs.utf16()
 	},
 	{
 		&st::foldersTrade,
 		&st::foldersTradeActive,
+		&st::foldersTabsTrade,
 		"\xF0\x9F\x93\x88"_cs.utf16()
 	},
 	{
 		&st::foldersWork,
 		&st::foldersWorkActive,
+		&st::foldersTabsWork,
 		"\xF0\x9F\x92\xBC"_cs.utf16()
 	},
 	{
 		&st::foldersUnmuted,
 		&st::foldersUnmutedActive,
+		&st::foldersTabsUnmuted,
 		"\xF0\x9F\x94\x94"_cs.utf16()
 	},
 	{
 		&st::foldersChannels,
 		&st::foldersChannelsActive,
+		&st::foldersTabsChannels,
 		"\xF0\x9F\x93\xA2"_cs.utf16()
 	},
 	{
 		&st::foldersCustom,
 		&st::foldersCustomActive,
+		&st::foldersTabsCustom,
 		"\xF0\x9F\x93\x81"_cs.utf16()
 	},
 	{
 		&st::foldersSetup,
 		&st::foldersSetupActive,
+		&st::foldersTabsSetup,
 		"\xF0\x9F\x93\x8B"_cs.utf16()
 	},
 	//{
@@ -208,6 +238,7 @@ const auto kIcons = std::vector<FilterIcons>{
 	{
 		&st::filtersEdit,
 		&st::filtersEdit,
+		&st::foldersTabsEdit,
 		QString()
 	}
 };

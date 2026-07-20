@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/rp_widget.h"
+#include "ui/rows_scroll_cache.h"
 #include "ui/widgets/tooltip.h"
 #include "info/media/info_media_widget.h"
 #include "info/media/info_media_common.h"
@@ -89,6 +90,10 @@ public:
 	void restoreState(not_null<Memento*> memento);
 
 	void jumpToMessage(MsgId msgId);
+
+	void setTopOverlayHeight(int height);
+
+	void setExternalViewportHeight(int height);
 
 	bool processZoomWheel(not_null<QWheelEvent*> e);
 	void zoomIn();
@@ -342,6 +347,7 @@ private:
 	base::flat_set<not_null<const BaseLayout*>> _heavyLayouts;
 	bool _heavyLayoutsInvalidated = false;
 	std::vector<Section> _sections;
+	Ui::RowsScrollCache _rowsScrollCache;
 
 	int _visibleTop = 0;
 	int _visibleBottom = 0;
@@ -368,6 +374,8 @@ private:
 	bool _wasSelectedText = false; // was some text selected in current drag action
 
 	const std::unique_ptr<DateBadge> _dateBadge;
+	int _topOverlayHeight = 0;
+	int _externalViewportHeight = 0;
 
 	int _selectedLimit = 0;
 	int _storiesAddToAlbumId = 0;

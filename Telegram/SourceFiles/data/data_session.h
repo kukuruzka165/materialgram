@@ -902,6 +902,9 @@ public:
 	void channelDifferenceTooLong(not_null<ChannelData*> channel);
 	[[nodiscard]] rpl::producer<not_null<ChannelData*>> channelDifferenceTooLong() const;
 
+	[[nodiscard]] auto communityAdminPromotions() const
+	-> rpl::producer<not_null<ChannelData*>>;
+
 	void registerItemView(not_null<ViewElement*> view);
 	void unregisterItemView(not_null<ViewElement*> view);
 
@@ -1043,6 +1046,9 @@ private:
 	void applyDialog(
 		Folder *requestFolder,
 		const MTPDdialogFolder &data);
+	void applyDialog(
+		Folder *requestFolder,
+		const MTPDdialogCommunity &data);
 
 	const Messages *messagesList(PeerId peerId) const;
 	not_null<Messages*> messagesListForInsert(PeerId peerId);
@@ -1309,6 +1315,7 @@ private:
 	rpl::event_stream<not_null<WebPageData*>> _webpageUpdates;
 	rpl::event_stream<not_null<PollData*>> _pollUpdates;
 	rpl::event_stream<not_null<ChannelData*>> _channelDifferenceTooLong;
+	rpl::event_stream<not_null<ChannelData*>> _communityAdminPromotions;
 	rpl::event_stream<not_null<PhotoData*>> _photoLoadProgress;
 	rpl::event_stream<not_null<DocumentData*>> _documentLoadProgress;
 	base::flat_set<not_null<ChannelData*>> _suggestToGigagroup;

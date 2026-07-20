@@ -38,17 +38,15 @@ parts:
     source-type: git
     parse-info: [usr/share/metainfo/org.telegram.desktop.metainfo.xml]
     build-environment:
-      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -Wl,--push-state,--no-as-needed,-ldav1d,--pop-state -s
-    build-snaps:
-      - cmake
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -Wl,--push-state,--no-as-needed,-ldav1d,--pop-state
     build-packages:
       - libboost-regex-dev
       - libheif-dev
       - libjxl-dev
+      - liblz4-dev
       - libssl-dev
       - libxcb-keysyms1-dev
       - libxcb-record0-dev
-      - libxcb-screensaver0-dev
     cmake-generator: Ninja
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
@@ -71,6 +69,7 @@ parts:
       craftctl set version="$version"
     override-build: |
       craftctl default
+      "$CRAFT_PART_SRC/Telegram/build/minidebug.sh" "$CRAFT_PART_INSTALL/usr/bin/Telegram"
       mv "$CRAFT_PART_INSTALL"/usr/bin/{Telegram,telegram-desktop}
 
       APP_ID=org.telegram.desktop
@@ -106,7 +105,6 @@ parts:
       - libopenh264-7
       - libxcb-cursor0
       - libxcb-record0
-      - libxcb-screensaver0
     stage:
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gstreamer-1.0/libgstde265.so
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gstreamer-1.0/libgstfdkaac.so
@@ -119,7 +117,6 @@ parts:
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libopenh264.so*
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libxcb-cursor.so*
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libxcb-record.so*
-      - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libxcb-screensaver.so*
 
   patches:
     source: https://github.com/desktop-app/patches.git

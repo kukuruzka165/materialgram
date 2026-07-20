@@ -919,6 +919,15 @@ bool StickersListWidget::searchShortcutsShown() const {
 	return (_section == Section::Search) && !_searchShortcutSets.empty();
 }
 
+bool StickersListWidget::canConsumeHorizontalScroll(QPoint position, int) {
+	if (!searchShortcutsShown() || (_searchShortcutsScrollMax <= 0)) {
+		return false;
+	}
+	const auto top = searchShortcutsTop();
+	return (position.y() >= top)
+		&& (position.y() < top + searchShortcutsHeight());
+}
+
 bool StickersListWidget::searchShortcutSelected() const {
 	return _searchSelectedSetId != 0;
 }
@@ -1114,16 +1123,14 @@ void StickersListWidget::toggleSearchLoading(bool loading) {
 void StickersListWidget::takeHeavyData(
 		std::vector<Set> &to,
 		std::vector<Set> &from) {
-	auto indices = base::flat_map<uint64, int>();
-	indices.reserve(from.size());
-	auto index = 0;
-	for (const auto &set : from) {
-		indices.emplace(set.id, index++);
-	}
+	auto used = std::vector<bool>(from.size(), false);
 	for (auto &toSet : to) {
-		const auto i = indices.find(toSet.id);
-		if (i != end(indices)) {
-			takeHeavyData(toSet, from[i->second]);
+		for (auto i = 0, count = int(from.size()); i != count; ++i) {
+			if (!used[i] && (from[i].id == toSet.id)) {
+				used[i] = true;
+				takeHeavyData(toSet, from[i]);
+				break;
+			}
 		}
 	}
 }

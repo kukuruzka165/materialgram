@@ -23,11 +23,14 @@ class VerticalLayout;
 class VerticalLayoutReorder;
 enum class FilterIcon : uchar;
 class PopupMenu;
+template <typename Widget>
+class SlideWrap;
 } // namespace Ui
 
 namespace Window {
 
 class SessionController;
+class FolderFavoriteButton;
 
 class FiltersMenu final {
 public:
@@ -40,6 +43,9 @@ private:
 	void setup();
 	void refresh();
 	void setupList();
+	void updateFavorite();
+	void createFavorite();
+	void destroyFavorite();
 	void applyReorder(
 		not_null<Ui::RpWidget*> widget,
 		int oldPosition,
@@ -73,6 +79,7 @@ private:
 	Ui::VerticalLayout *_list = nullptr;
 	std::unique_ptr<Ui::VerticalLayoutReorder> _reorder;
 	base::unique_qptr<Ui::SideBarButton> _setup;
+	base::unique_qptr<Ui::SlideWrap<FolderFavoriteButton>> _favorite;
 	base::flat_map<FilterId, base::unique_qptr<Ui::SideBarButton>> _filters;
 	base::weak_qptr<Ui::SideBarButton> _tabStop;
 	rpl::variable<bool> _includeMuted;

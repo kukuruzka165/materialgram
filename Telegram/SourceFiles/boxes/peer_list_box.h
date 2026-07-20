@@ -12,8 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/unread_badge.h"
 #include "ui/userpic_view.h"
 #include "ui/layers/box_content.h"
+#include "ui/rows_scroll_cache.h"
 #include "base/timer.h"
-#include "boxes/peer_list_scroll_cache.h"
 
 namespace style {
 struct PeerList;
@@ -190,6 +190,9 @@ public:
 		int outerWidth,
 		bool selected,
 		int selectedElement);
+	[[nodiscard]] virtual bool elementsAnimating() const {
+		return false;
+	}
 
 	virtual void refreshName(const style::PeerListItem &st);
 	const Ui::Text::String &name() const {
@@ -197,6 +200,7 @@ public:
 	}
 
 	virtual bool useForumLikeUserpic() const;
+	[[nodiscard]] virtual bool paintCommunityUserpicEffect() const;
 
 	enum class StatusType {
 		Online,
@@ -330,6 +334,7 @@ private:
 	std::pair<uint64, uint64> _userpicKey;
 	std::unique_ptr<Ui::RippleAnimation> _ripple;
 	std::unique_ptr<Ui::RoundImageCheckbox> _checkbox;
+	std::unique_ptr<Ui::CommunityUserpicEffect> _communityUserpicEffect;
 	Ui::Text::String _name;
 	Ui::Text::String _status;
 	Ui::PeerBadge _badge;
@@ -534,6 +539,11 @@ public:
 			rowRightActionClicked(row);
 		}
 	}
+	virtual void rowElementHovered(
+		not_null<PeerListRow*> row,
+		int element,
+		QRect elementRect) {
+	}
 
 	virtual bool rowTrackPress(not_null<PeerListRow*> row) {
 		return false;
@@ -620,6 +630,10 @@ public:
 	[[nodiscard]] virtual Fn<QImage()> customRowRippleMaskGenerator() {
 		Unexpected("PeerListController::customRowRippleMaskGenerator.");
 	}
+	virtual void customRowAddRipple(
+		not_null<PeerListRow*> row,
+		QPoint point,
+		Fn<void()> updateCallback);
 
 	virtual bool overrideKeyboardNavigation(
 			int direction,
@@ -970,7 +984,7 @@ private:
 	base::Timer _repaintByStatus;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 
-	PeerListRowsScrollCache _rowsScrollCache;
+	Ui::RowsScrollCache _rowsScrollCache;
 
 };
 

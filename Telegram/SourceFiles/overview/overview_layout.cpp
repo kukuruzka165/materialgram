@@ -72,6 +72,16 @@ constexpr auto kStoryRatio = 1.46;
 
 using ::Media::ValidFrameSize;
 
+[[nodiscard]] bool ItemPlaying(
+		not_null<DocumentData*> document,
+		FullMsgId context,
+		AudioMsgId::Type type) {
+	const auto state = Media::Player::instance()->getState(type);
+	return (state.id
+			== AudioMsgId(document, context, state.id.externalPlayId()))
+		&& !Media::Player::IsStoppedOrStopping(state.state);
+}
+
 [[nodiscard]] bool CanPlayInline(not_null<DocumentData*> document) {
 	return ValidFrameSize(document->dimensions, kMaxInlineArea);
 }
@@ -416,18 +426,23 @@ void Photo::paint(Painter &p, const QRect &clip, TextSelection selection, const 
 			&& (_dataMedia->loaded()
 				|| _dataMedia->image(Data::PhotoSize::Thumbnail));
 		if ((good && !_goodLoaded) || widthChanged) {
-			_goodLoaded = good;
-			_pix = QImage();
-			if (_goodLoaded) {
-				setPixFrom(_dataMedia->image(Data::PhotoSize::Large)
-					? _dataMedia->image(Data::PhotoSize::Large)
-					: _dataMedia->image(Data::PhotoSize::Thumbnail));
-			} else if (const auto small = _spoiler
-				? nullptr
-				: _dataMedia->image(Data::PhotoSize::Small)) {
-				setPixFrom(small);
-			} else if (const auto blurred = _dataMedia->thumbnailInline()) {
-				setPixFrom(blurred);
+			if (widthChanged) {
+				_goodLoaded = false;
+				_goodRequested = false;
+				_pix = QImage();
+			}
+			if (good) {
+				requestGoodPix();
+			}
+			if (_pix.isNull()) {
+				if (const auto small = _spoiler
+					? nullptr
+					: _dataMedia->image(Data::PhotoSize::Small)) {
+					setPixFrom(small);
+				} else if (const auto blurred
+					= _dataMedia->thumbnailInline()) {
+					setPixFrom(blurred);
+				}
 			}
 		}
 	}
@@ -476,6 +491,46 @@ void Photo::paint(Painter &p, const QRect &clip, TextSelection selection, const 
 	const auto checkLeft = _width - checkDelta;
 	const auto checkTop = _height - checkDelta;
 	paintCheckbox(p, { checkLeft, checkTop }, selected, context);
+}
+
+bool Photo::elementsAnimating() const {
+	return (_spoiler != nullptr);
+}
+
+void Photo::requestGoodPix() {
+	Expects(_dataMedia != nullptr);
+
+	if (_goodRequested || !_width || !_height) {
+		return;
+	}
+	const auto image = _dataMedia->image(Data::PhotoSize::Large)
+		? _dataMedia->image(Data::PhotoSize::Large)
+		: _dataMedia->image(Data::PhotoSize::Thumbnail);
+	if (!image) {
+		return;
+	}
+	_goodRequested = true;
+
+	const auto width = _width;
+	const auto height = _height;
+	const auto id = ++_goodRequestId;
+	const auto weak = base::make_weak(this);
+	crl::async([=, original = image->original()]() mutable {
+		auto result = CropMediaFrame(std::move(original), width, height);
+		crl::on_main(weak, [=, result = std::move(result)]() mutable {
+			weak->goodPixReady(std::move(result), id);
+		});
+	});
+}
+
+void Photo::goodPixReady(QImage image, uint32 id) {
+	if (id != _goodRequestId) {
+		return;
+	}
+	_goodRequested = false;
+	_pix = std::move(image);
+	_goodLoaded = true;
+	delegate()->repaintItem(this);
 }
 
 void Photo::setPixFrom(not_null<Image*> image) {
@@ -556,6 +611,7 @@ Video::Video(
 , _data(video)
 , _videoCover(LookupVideoCover(video, parent))
 , _duration(Ui::FormatDurationText(_data->duration() / 1000))
+, _durationw(st::normalFont->width(_duration))
 , _spoiler((options.spoiler || parent->isMediaSensitive())
 	? std::make_unique<Ui::SpoilerAnimation>([=] {
 		delegate->repaintItem(this);
@@ -639,16 +695,25 @@ void Video::paint(
 	const auto radial = isRadialAnimation();
 	const auto radialOpacity = radial ? _radial->opacity() : 0.;
 
-	if ((blurred || thumbnail || good)
-		&& ((_pix.width() != _width * style::DevicePixelRatio())
-			|| (_pixBlurred && (thumbnail || good)))) {
-		auto img = good
-			? good->original()
-			: thumbnail
-			? thumbnail->original()
-			: Images::Blur(blurred->original());
-		_pix = CropMediaFrame(std::move(img), _width, _height);
-		_pixBlurred = !(thumbnail || good);
+	const auto widthChanged = (_pix.width()
+		!= _width * style::DevicePixelRatio());
+	if (widthChanged) {
+		_pix = QImage();
+		_pixBlurred = true;
+		_goodRequested = false;
+	}
+	const auto better = good ? good : thumbnail;
+	if (_pix.isNull()) {
+		if (const auto source = blurred ? blurred : better) {
+			auto img = (source == blurred)
+				? Images::Blur(source->original())
+				: source->original();
+			_pix = CropMediaFrame(std::move(img), _width, _height);
+			_pixBlurred = (source == blurred);
+		}
+	}
+	if (better && _pixBlurred) {
+		requestGoodPix(better);
 	}
 
 	if (_pix.isNull()) {
@@ -698,12 +763,15 @@ void Video::paint(
 				? (selected ? st::overviewVideoDownloadSelected : st::overviewVideoDownload)
 				: (selected ? st::overviewVideoPlaySelected : st::overviewVideoPlay);
 			const auto text = download ? _status.text() : _duration;
+			const auto textw = download
+				? st::normalFont->width(text)
+				: _durationw;
 			const auto margin = st::overviewVideoStatusMargin;
 			const auto padding = st::overviewVideoStatusPadding;
 			const auto statusX = margin + padding.x(), statusY = _height - margin - padding.y() - st::normalFont->height;
 			const auto fullW = icon.width()
 				+ 3 * padding.x()
-				+ st::normalFont->width(text);
+				+ textw;
 			const auto showText = (fullW <= _width - 2 * margin);
 			const auto statusW = showText
 				? fullW
@@ -752,6 +820,38 @@ void Video::paint(
 	const auto checkLeft = _width - checkDelta;
 	const auto checkTop = _height - checkDelta;
 	paintCheckbox(p, { checkLeft, checkTop }, selected, context);
+}
+
+bool Video::elementsAnimating() const {
+	return RadialProgressItem::elementsAnimating() || (_spoiler != nullptr);
+}
+
+void Video::requestGoodPix(not_null<Image*> image) {
+	if (_goodRequested || !_width || !_height) {
+		return;
+	}
+	_goodRequested = true;
+
+	const auto width = _width;
+	const auto height = _height;
+	const auto id = ++_goodRequestId;
+	const auto weak = base::make_weak(this);
+	crl::async([=, original = image->original()]() mutable {
+		auto result = CropMediaFrame(std::move(original), width, height);
+		crl::on_main(weak, [=, result = std::move(result)]() mutable {
+			weak->goodPixReady(std::move(result), id);
+		});
+	});
+}
+
+void Video::goodPixReady(QImage image, uint32 id) {
+	if (id != _goodRequestId) {
+		return;
+	}
+	_goodRequested = false;
+	_pix = std::move(image);
+	_pixBlurred = false;
+	delegate()->repaintItem(this);
 }
 
 void Video::ensureDataMediaCreated() const {
@@ -1045,6 +1145,13 @@ void Voice::paint(Painter &p, const QRect &clip, TextSelection selection, const 
 	const auto checkLeft = _st.songPadding.left() + checkDelta;
 	const auto checkTop = _st.songPadding.top() + checkDelta;
 	paintCheckbox(p, { checkLeft, checkTop }, selected, context);
+}
+
+bool Voice::elementsAnimating() const {
+	return RadialProgressItem::elementsAnimating()
+		|| _details.hasPersistentAnimation()
+		|| _caption.hasPersistentAnimation()
+		|| ItemPlaying(_data, parent()->fullId(), AudioMsgId::Type::Voice);
 }
 
 TextState Voice::getState(
@@ -1476,6 +1583,15 @@ void Document::paint(Painter &p, const QRect &clip, TextSelection selection, con
 		? _st.songPadding.top()
 		: (st::linksBorder + _st.filePadding.top())) + checkDelta;
 	paintCheckbox(p, { checkLeft, checkTop }, selected, context);
+}
+
+bool Document::elementsAnimating() const {
+	if (RadialProgressItem::elementsAnimating()
+		|| _name.hasPersistentAnimation()) {
+		return true;
+	}
+	return songLayout()
+		&& ItemPlaying(_data, parent()->fullId(), AudioMsgId::Type::Song);
 }
 
 void Document::paintThumbnail(
@@ -2119,6 +2235,18 @@ void Link::paint(Painter &p, const QRect &clip, TextSelection selection, const P
 	paintCheckbox(p, { checkLeft, checkTop }, selected, context);
 }
 
+bool Link::elementsAnimating() const {
+	if (_text.hasPersistentAnimation()) {
+		return true;
+	}
+	for (const auto &link : _links) {
+		if (link.text.hasPersistentAnimation()) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void Link::validateThumbnail() {
 	if (!_thumbnail.isNull() && !_thumbnailBlurred) {
 		return;
@@ -2548,6 +2676,12 @@ void Gif::paint(
 	const auto checkLeft = _width - checkDelta;
 	const auto checkTop = st::overviewCheckSkip;
 	paintCheckbox(p, { checkLeft, checkTop }, selected, context);
+}
+
+bool Gif::elementsAnimating() const {
+	return RadialProgressItem::elementsAnimating()
+		|| (_spoiler != nullptr)
+		|| (_gif && _gif->started());
 }
 
 void Gif::update() {

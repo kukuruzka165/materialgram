@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/local_url_handlers.h"
 #include "core/shortcuts.h"
 #include "core/ui_integration.h" // TextContext
+#include "data/components/ephemeral_messages.h"
 #include "data/components/location_pickers.h"
 #include "data/data_bot_app.h"
 #include "data/data_changes.h"
@@ -52,9 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/inline_bot_confirm_prepared.h"
 #include "inline_bots/inline_bot_downloads.h"
 #include "inline_bots/inline_bot_storage.h"
-#ifdef TDESKTOP_IV_EDITOR
 #include "iv/editor/iv_editor_session.h"
-#endif // TDESKTOP_IV_EDITOR
 #include "iv/iv_instance.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
@@ -71,6 +70,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/attach/attach_bot_webview.h"
 #include "ui/controls/location_picker.h"
 #include "ui/controls/userpic_button.h"
+#include "ui/delayed_activation.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/painter.h"
 #include "ui/text/text_custom_emoji.h"
@@ -1028,9 +1028,7 @@ void WebViewInstance::resolve() {
 		requestMain();
 	}, [&](WebViewSourceJoinChat data) {
 		confirmOpen([=] {
-			show({
-				.result = data.result,
-			});
+			requestChatJoin();
 		}, true);
 	});
 }
@@ -1324,6 +1322,26 @@ void WebViewInstance::requestApp(bool allowWrite) {
 		if (error.type() == u"BOT_INVALID"_q) {
 			_session->attachWebView().requestBots();
 		}
+		close();
+	}).send();
+}
+
+void WebViewInstance::requestChatJoin() {
+	const auto &join = v::get<WebViewSourceJoinChat>(_source);
+	using Flag = MTPmessages_RequestChatJoinWebView::Flag;
+	_requestId = _session->api().request(MTPmessages_RequestChatJoinWebView(
+		MTP_flags(Flag::f_theme_params),
+		MTP_long(join.queryId),
+		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
+		MTP_string("tdesktop")
+	)).done([=](const MTPWebViewResult &result) {
+		_requestId = 0;
+		show({
+			.result = ParseWebViewResult(result),
+		});
+	}).fail([=](const MTP::Error &error) {
+		_requestId = 0;
+		_parentShow->showToast(error.type());
 		close();
 	}).send();
 }
@@ -2853,7 +2871,10 @@ void ChooseAndSendLocation(
 	};
 	const auto state = std::make_shared<State>();
 	state->send = [=](Data::InputVenue venue, Api::SendAction action) {
-		if (const auto strong = weak.get()) {
+		const auto strong = weak.get();
+		const auto ephemeralReply = session->ephemeralMessages()
+			.isEphemeralBotReply(action.replyTo.messageId);
+		if (strong && !ephemeralReply) {
 			const auto withPaymentApproved = [=](int stars) {
 				if (const auto onstack = state->send) {
 					auto copy = action;
@@ -2960,23 +2981,27 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				sendMenuDetails());
 		}, &st::menuIconCreateTodoList);
 	}
-#ifdef TDESKTOP_IV_EDITOR
-	if (Data::CanSendAnyOf(peer, ChatRestriction::SendOther, false)) {
+	if (Iv::Editor::CanAuthorRichMessages(&controller->session())
+		&& Data::CanSendAnyOf(peer, ChatRestriction::SendOther, false)) {
 		raw->addAction(tr::lng_article_menu_item(tr::now), [=] {
-			Iv::Editor::ShowComposeBox(
-				controller,
-				peer,
-				actionFactory(),
-				sendMenuDetails);
+			const auto action = actionFactory();
+			if (ShowEphemeralReplyTextOnlyError(
+					controller->uiShow(),
+					&controller->session(),
+					action.replyTo.messageId)) {
+				return;
+			}
+			const auto details = sendMenuDetails();
+			Iv::Editor::ShowComposeBox(controller, peer, action, details);
 		}, &st::menuIconArticle);
 	}
-#endif // TDESKTOP_IV_EDITOR
 	const auto session = &controller->session();
 	const auto locationType = ChatRestriction::SendOther;
 	const auto config = ResolveMapsConfig(session);
 	if (Data::CanSendAnyOf(peer, locationType, false)
 		&& Ui::LocationPicker::Available(config)) {
 		raw->addAction(tr::lng_maps_point(tr::now), [=] {
+			Ui::PreventDelayedActivation();
 			ChooseAndSendLocation(controller, config, actionFactory());
 		}, &st::menuIconAddress);
 	}

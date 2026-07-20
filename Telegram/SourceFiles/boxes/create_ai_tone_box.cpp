@@ -163,6 +163,79 @@ void ChooseToneIconBox(
 
 } // namespace
 
+not_null<Ui::FlatLabel*> AddAiComposeFieldDecor(
+		not_null<Ui::InputField*> field,
+		rpl::producer<QString> placeholder) {
+	struct FieldDecor {
+		not_null<Ui::RpWidget*> bg;
+		not_null<Ui::FlatLabel*> placeholder;
+		Ui::Animations::Simple anim;
+		bool hidden = false;
+	};
+	const auto parent = field->parentWidget();
+	const auto decor = field->lifetime().make_state<FieldDecor>(FieldDecor{
+		.bg = Ui::CreateChild<Ui::RpWidget>(parent),
+		.placeholder = Ui::CreateChild<Ui::FlatLabel>(
+			parent,
+			std::move(placeholder),
+			st::aiTonePlaceholderLabel),
+	});
+	decor->bg->setAttribute(Qt::WA_TransparentForMouseEvents);
+	decor->placeholder->setAttribute(Qt::WA_TransparentForMouseEvents);
+	decor->bg->paintRequest(
+	) | rpl::on_next([bg = decor->bg] {
+		auto p = QPainter(bg);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::aiToneFieldBg);
+		const auto r = st::aiToneFieldRadius;
+		p.drawRoundedRect(bg->rect(), r, r);
+	}, decor->bg->lifetime());
+	decor->bg->lower();
+	decor->placeholder->raise();
+
+	const auto applyPosition = [=] {
+		const auto pad = st::aiToneFieldPadding;
+		const auto progress = decor->anim.value(decor->hidden ? 1. : 0.);
+		const auto shift = int(base::SafeRound(
+			progress * (-st::defaultInputField.placeholderShift)));
+		decor->placeholder->moveToLeft(
+			field->x() + pad.left() + shift,
+			field->y() + pad.top());
+		decor->placeholder->setOpacity(1. - progress);
+	};
+	field->geometryValue(
+	) | rpl::on_next([=](QRect g) {
+		if (g.isEmpty()) {
+			return;
+		}
+		const auto pad = st::aiToneFieldPadding;
+		decor->bg->setGeometry(g);
+		decor->placeholder->resizeToWidth(
+			g.width() - pad.left() - pad.right());
+		applyPosition();
+	}, field->lifetime());
+
+	const auto animate = [=](bool hidden) {
+		if (decor->hidden == hidden) {
+			return;
+		}
+		decor->hidden = hidden;
+		decor->anim.start(
+			applyPosition,
+			hidden ? 0. : 1.,
+			hidden ? 1. : 0.,
+			st::defaultInputField.duration);
+	};
+	field->changes(
+	) | rpl::on_next([=] {
+		animate(!field->getLastText().isEmpty());
+	}, field->lifetime());
+	decor->hidden = !field->getLastText().isEmpty();
+	applyPosition();
+	return decor->placeholder;
+}
+
 not_null<Ui::AbstractButton*> AddAiToneIconPreview(
 		not_null<Ui::VerticalLayout*> container,
 		not_null<Main::Session*> session,
@@ -391,80 +464,8 @@ void SetupToneBox(
 		u"aicompose_tone_prompt_length_max"_q,
 		1024));
 
-	struct FieldDecor {
-		not_null<Ui::RpWidget*> bg;
-		not_null<Ui::FlatLabel*> placeholder;
-		Ui::Animations::Simple anim;
-		bool hidden = false;
-	};
-	const auto makeDecor = [=](
-			not_null<Ui::InputField*> field,
-			rpl::producer<QString> placeholderText) {
-		const auto parent = field->parentWidget();
-		const auto decor = field->lifetime().make_state<FieldDecor>(FieldDecor{
-			.bg = Ui::CreateChild<Ui::RpWidget>(parent),
-			.placeholder = Ui::CreateChild<Ui::FlatLabel>(
-				parent,
-				std::move(placeholderText),
-				st::aiTonePlaceholderLabel),
-		});
-		decor->bg->setAttribute(Qt::WA_TransparentForMouseEvents);
-		decor->placeholder->setAttribute(Qt::WA_TransparentForMouseEvents);
-		decor->bg->paintRequest(
-		) | rpl::on_next([bg = decor->bg] {
-			auto p = QPainter(bg);
-			auto hq = PainterHighQualityEnabler(p);
-			p.setPen(Qt::NoPen);
-			p.setBrush(st::aiToneFieldBg);
-			const auto r = st::aiToneFieldRadius;
-			p.drawRoundedRect(bg->rect(), r, r);
-		}, decor->bg->lifetime());
-		decor->bg->lower();
-		decor->placeholder->raise();
-
-		const auto applyPosition = [=] {
-			const auto pad = st::aiToneFieldPadding;
-			const auto progress = decor->anim.value(decor->hidden ? 1. : 0.);
-			const auto shift = int(base::SafeRound(
-				progress * (-st::defaultInputField.placeholderShift)));
-			decor->placeholder->moveToLeft(
-				field->x() + pad.left() + shift,
-				field->y() + pad.top());
-			decor->placeholder->setOpacity(1. - progress);
-		};
-		field->geometryValue(
-		) | rpl::on_next([=](QRect g) {
-			if (g.isEmpty()) {
-				return;
-			}
-			const auto pad = st::aiToneFieldPadding;
-			decor->bg->setGeometry(g);
-			decor->placeholder->resizeToWidth(
-				g.width() - pad.left() - pad.right());
-			applyPosition();
-		}, field->lifetime());
-
-		const auto animate = [=](bool hidden) {
-			if (decor->hidden == hidden) {
-				return;
-			}
-			decor->hidden = hidden;
-			decor->anim.start(
-				applyPosition,
-				hidden ? 0. : 1.,
-				hidden ? 1. : 0.,
-				st::defaultInputField.duration);
-		};
-		field->changes(
-		) | rpl::on_next([=] {
-			animate(!field->getLastText().isEmpty());
-		}, field->lifetime());
-		decor->hidden = !field->getLastText().isEmpty();
-		applyPosition();
-		return decor;
-	};
-	makeDecor(name, tr::lng_ai_compose_tone_name_placeholder());
-	const auto promptDecor = makeDecor(
+	AddAiComposeFieldDecor(name, tr::lng_ai_compose_tone_name_placeholder());
+	const auto promptPlaceholder = AddAiComposeFieldDecor(
 		prompt,
 		tr::lng_ai_compose_tone_prompt_placeholder());
 
@@ -500,7 +501,7 @@ void SetupToneBox(
 
 	rpl::combine(
 		prompt->topValue(),
-		promptDecor->placeholder->heightValue(),
+		promptPlaceholder->heightValue(),
 		box->getDelegate()->contentHeightMaxValue()
 	) | rpl::on_next([=](int top, int phHeight, int contentHeight) {
 		const auto pad = st::aiToneFieldPadding;

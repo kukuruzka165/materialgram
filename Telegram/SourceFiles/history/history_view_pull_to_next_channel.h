@@ -8,16 +8,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/unique_qptr.h"
+#include "base/timer.h"
+#include "base/weak_ptr.h"
 #include "ui/effects/animations.h"
 
 class History;
 class HistoryInner;
-class QEvent;
-class QWheelEvent;
 
 namespace Ui {
 class RpWidget;
-class ContinuousScroll;
+class ElasticScroll;
+struct ElasticScrollPosition;
+enum class ElasticScrollMovement;
 } // namespace Ui
 
 namespace Window {
@@ -30,7 +32,7 @@ class PullToNextChannel final {
 public:
 	PullToNextChannel(
 		not_null<Ui::RpWidget*> parent,
-		not_null<Ui::ContinuousScroll*> scroll,
+		not_null<Ui::ElasticScroll*> scroll,
 		not_null<Window::SessionController*> controller);
 	~PullToNextChannel();
 
@@ -46,45 +48,38 @@ private:
 
 	[[nodiscard]] bool active() const;
 	[[nodiscard]] bool atBottom() const;
-	[[nodiscard]] bool processWheel(not_null<QWheelEvent*> e);
-	[[nodiscard]] bool applyDelta(float64 deltaX, float64 deltaY);
-	[[nodiscard]] bool release();
-	void push(float64 offset, bool ready, bool visible, History *next);
-	void render(bool ready);
+	void handleOverscroll(
+		Ui::ElasticScrollPosition position,
+		Ui::ElasticScrollMovement movement);
+	void updatePullCurve();
 	void startExpand(bool ready);
-	void applyShift(int shift);
-	void startRetract(float64 fromAccumulated, History *next);
+	void pushIndicator();
 	void clearState();
 	void reset();
-	void jumpWhenReady(not_null<History*> next, crl::time waited);
+	void jumpWhenReady(base::weak_ptr<History> next, crl::time waited);
 	void jumpTo(not_null<History*> history);
 
 	const not_null<Ui::RpWidget*> _parent;
-	const not_null<Ui::ContinuousScroll*> _scroll;
+	const not_null<Ui::ElasticScroll*> _scroll;
 	const not_null<Window::SessionController*> _controller;
 	const base::unique_qptr<Indicator> _indicator;
 	const base::unique_qptr<HintOverlay> _hint;
 
-	QPointer<HistoryInner> _inner;
-	History *_history = nullptr;
-	History *_next = nullptr;
+	base::weak_ptr<History> _history;
+	base::weak_ptr<History> _next;
 
-	base::unique_qptr<QObject> _filter;
-	Ui::Animations::Simple _retract;
-	Ui::Animations::Simple _expand;
-
-	float64 _pushOffset = 0.;
-	bool _pushVisible = false;
-	History *_pushNext = nullptr;
-
-	float64 _accumulated = 0.;
-	float64 _offset = 0.;
-	float64 _swipeX = 0.;
-	float64 _swipeY = 0.;
-	bool _engaged = false;
+	bool _pulling = false;
+	bool _committed = false;
+	bool _jumping = false;
 	bool _reached = false;
-	bool _gaveUp = false;
-	bool _swallowMomentum = false;
+	bool _expandTo = false;
+	float64 _pull = 0.;
+	float64 _peakPull = 0.;
+	float64 _effective = 0.;
+	Ui::Animations::Simple _expand;
+	base::Timer _dwellTimer;
+
+	rpl::lifetime _lifetime;
 
 };
 

@@ -122,7 +122,18 @@ constexpr auto kDefaultChargeStars = 10;
 -> std::vector<NestedEditFlagsLabels<ChatAdminRights>> {
 	using Flag = ChatAdminRight;
 
-	if (options.isGroup) {
+	if (options.isCommunity) {
+		auto rights = std::vector<AdminRightLabel>{
+			{ Flag::ChangeInfo, tr::lng_rights_community_info(tr::now) },
+			{
+				Flag::ManageLinkedPeers,
+				tr::lng_rights_community_linked(tr::now),
+			},
+			{ Flag::BanUsers, tr::lng_rights_community_ban(tr::now) },
+			{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) },
+		};
+		return { { std::nullopt, std::move(rights) } };
+	} else if (options.isGroup) {
 		auto first = std::vector<AdminRightLabel>{
 			{ Flag::ChangeInfo, tr::lng_rights_group_info(tr::now) },
 			{ Flag::DeleteMessages, tr::lng_rights_group_delete(tr::now) },

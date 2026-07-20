@@ -386,7 +386,8 @@ void ToggleChatsController::prepare() {
 		return peer->isChat()
 			? peer->asChat()->isForbidden()
 			: peer->isChannel()
-			? peer->asChannel()->isForbidden()
+			? (peer->asChannel()->isForbidden()
+				|| peer->asChannel()->isCommunity())
 			: false;
 	};
 	const auto add = [&](not_null<PeerData*> peer, bool additional = false) {

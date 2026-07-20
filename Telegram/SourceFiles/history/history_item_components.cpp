@@ -33,7 +33,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "core/local_url_handlers.h"
 #include "core/ui_integration.h"
-#include "layout/layout_position.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
 #include "data/business/data_shortcut_messages.h"
@@ -509,6 +508,8 @@ FullReplyTo ReplyToFromMTP(
 		return FullReplyTo{
 			.monoforumPeerId = parsed ? parsed->id : PeerId(),
 		};
+	}, [&](const MTPDinputReplyToEphemeralMessage &) {
+		return FullReplyTo();
 	});
 }
 
@@ -813,9 +814,6 @@ ReplyKeyboard::ReplyKeyboard(
 	not_null<const HistoryItem*> item,
 	std::unique_ptr<Style> &&s)
 : _item(item)
-, _selectedAnimation([=](crl::time now) {
-	return selectedAnimationCallback(now);
-})
 , _st(std::move(s)) {
 	if (const auto markup = _item->Get<HistoryMessageReplyMarkup>()) {
 		const auto owner = &_item->history()->owner();
@@ -1159,7 +1157,8 @@ void ReplyKeyboard::clickHandlerActiveChanged(
 	_savedActive = active ? p : ClickHandlerPtr();
 	auto coords = findButtonCoordsByClickHandler(p);
 	if (coords.i >= 0 && _savedPressed != p) {
-		startAnimation(coords.i, coords.j, active ? 1 : -1);
+		_rows[coords.i][coords.j].howMuchOver = active ? 1. : 0.;
+		_st->repaint(_item);
 	}
 }
 
@@ -1213,55 +1212,19 @@ void ReplyKeyboard::clickHandlerPressedChanged(
 				button.ripple->lastStop();
 			}
 			if (_savedActive != handler) {
-				startAnimation(coords.i, coords.j, -1);
+				button.howMuchOver = 0.;
+				_st->repaint(_item);
 			}
 		}
 	}
 }
 
-void ReplyKeyboard::startAnimation(int i, int j, int direction) {
-	auto notStarted = _animations.empty();
-
-	int indexForAnimation = Layout::PositionToIndex(i, j + 1) * direction;
-
-	_animations.remove(-indexForAnimation);
-	if (!_animations.contains(indexForAnimation)) {
-		_animations.emplace(indexForAnimation, crl::now());
-	}
-
-	if (notStarted && !_selectedAnimation.animating()) {
-		_selectedAnimation.start();
-	}
-}
-
-bool ReplyKeyboard::selectedAnimationCallback(crl::time now) {
-	if (anim::Disabled()) {
-		now += st::botKbDuration;
-	}
-	for (auto i = _animations.begin(); i != _animations.end();) {
-		const auto index = std::abs(i->first) - 1;
-		const auto &[row, col] = Layout::IndexToPosition(index);
-		const auto dt = float64(now - i->second) / st::botKbDuration;
-		if (dt >= 1) {
-			_rows[row][col].howMuchOver = (i->first > 0) ? 1 : 0;
-			i = _animations.erase(i);
-		} else {
-			_rows[row][col].howMuchOver = (i->first > 0) ? dt : (1 - dt);
-			++i;
+void ReplyKeyboard::clearSelection() {
+	for (auto &row : _rows) {
+		for (auto &button : row) {
+			button.howMuchOver = 0.;
 		}
 	}
-	_st->repaint(_item);
-	return !_animations.empty();
-}
-
-void ReplyKeyboard::clearSelection() {
-	for (const auto &[relativeIndex, time] : _animations) {
-		const auto index = std::abs(relativeIndex) - 1;
-		const auto &[row, col] = Layout::IndexToPosition(index);
-		_rows[row][col].howMuchOver = 0;
-	}
-	_animations.clear();
-	_selectedAnimation.stop();
 }
 
 int ReplyKeyboard::Style::buttonSkip() const {

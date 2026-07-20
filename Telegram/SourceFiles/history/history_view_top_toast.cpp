@@ -71,7 +71,8 @@ void InfoTooltip::hide(anim::type animated) {
 }
 
 void AnchoredTooltip::show(
-		not_null<Ui::ScrollArea*> scroll,
+		not_null<QWidget*> scroll,
+		rpl::producer<> scrolls,
 		QRect globalArea,
 		TextWithEntities text) {
 	if (globalArea.isEmpty()) {
@@ -95,8 +96,7 @@ void AnchoredTooltip::show(
 	raw->toggleAnimated(true);
 	raw->hideAfter(kAnchoredTooltipDuration);
 
-	scroll->scrolls(
-	) | rpl::on_next([=] {
+	std::move(scrolls) | rpl::on_next([=] {
 		raw->toggleAnimated(false);
 	}, raw->lifetime());
 }

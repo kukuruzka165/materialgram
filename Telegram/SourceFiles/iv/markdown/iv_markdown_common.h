@@ -234,6 +234,7 @@ struct EmbedRequest {
 
 struct MediaActivation {
 	MediaActivationKind kind = MediaActivationKind::None;
+	int itemIndex = -1;
 	QString url;
 	EmbedRequest embed;
 	PreparedPlaceholderBlockId placeholderId;
@@ -264,6 +265,7 @@ struct OpenOptions {
 	std::function<bool(
 		const MediaActivation &,
 		Qt::MouseButton)> activateMedia;
+	std::function<void()> zoomActivated;
 	rpl::producer<> downloadTaskFinished;
 };
 

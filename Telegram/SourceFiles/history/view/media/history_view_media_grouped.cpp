@@ -326,6 +326,16 @@ QRect GroupedMedia::groupItemRect(int index) const {
 	return {};
 }
 
+Media *GroupedMedia::partMediaAt(QPoint point) const {
+	point -= QPoint(0, groupedPadding().top());
+	for (const auto &part : _parts) {
+		if (part.geometry.contains(point)) {
+			return part.content.get();
+		}
+	}
+	return nullptr;
+}
+
 Media *GroupedMedia::lookupSpoilerTagMedia() const {
 	if (_parts.empty()) {
 		return nullptr;

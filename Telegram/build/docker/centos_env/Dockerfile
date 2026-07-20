@@ -13,7 +13,7 @@ ENV PKG_CONFIG_PATH=/opt/rh/$TOOLSET/root/usr/lib64/pkgconfig:/opt/rh/$TOOLSET/r
 RUN --mount=type=cache,target=/var/cache/dnf <<EOF
 dnf -y install epel-release
 dnf config-manager --set-enabled powertools
-dnf -y install autoconf automake libtool pkgconfig make patch git \
+dnf -y install cmake autoconf automake libtool pkgconfig make patch git \
 	python3.11-pip python3.11-devel gperf flex bison clang-tools-extra \
 	lld ccache nasm file which wget perl-open perl-XML-Parser perl-IPC-Cmd \
 	xorg-x11-util-macros $TOOLSET-gcc $TOOLSET-gcc-c++ $TOOLSET-binutils \
@@ -27,7 +27,7 @@ EOF
 
 RUN <<EOF
 alternatives --set python3 /usr/bin/python3.11
-python3 -m pip install cmake meson ninja
+python3 -m pip install meson ninja
 EOF
 
 RUN <<EOF
@@ -42,7 +42,11 @@ chmod +x /usr/local/bin/pkg-config
 
 CMAKE_ROOT="$(cmake --system-information | sed -n 's/^CMAKE_ROOT "\([^"]*\)"$/\1/p')"
 test -n "$CMAKE_ROOT"
-sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/")/ -O0 {% if LTO %}-fno-lto -fno-use-linker-plugin{% endif %} -fuse-ld=lld")/' "$CMAKE_ROOT/Modules/Compiler/GNU.cmake"
+sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/")/ -O0 {% if LTO %}-fno-lto -fno-use-linker-plugin{% endif %}")/' "$CMAKE_ROOT/Modules/Compiler/GNU.cmake"
+for i in EXE SHARED MODULE; do
+	sed -i '1i string(APPEND CMAKE_'$i'_LINKER_FLAGS_DEBUG_INIT " -fuse-ld=lld")' "$CMAKE_ROOT/Modules/CMakeCommonLanguageInclude.cmake"
+done
+sed -i '/CMAKE_EXE_LINKER_FLAGS_INIT/s/")/ -Wl,--exclude-libs,ALL")/' "$CMAKE_ROOT/Modules/CMakeCommonLanguageInclude.cmake"
 sed -i '/__gcc_hints/d' "$CMAKE_ROOT/Modules/Compiler/GNU-FindBinUtils.cmake"
 sed -i '1i set(_CMAKE_TOOLCHAIN_LOCATION "")' "$CMAKE_ROOT/Modules/CMakeFindBinUtils.cmake"
 sed -i 's/NO_DEFAULT_PATH//g; s/PKG_CONFIG_ALLOW_SYSTEM_LIBS/PKG_CONFIG_IS_DUMB/g' "$CMAKE_ROOT/Modules/FindPkgConfig.cmake"
@@ -114,7 +118,38 @@ implib /usr/lib64/libwayland-cursor.so
 implib /usr/lib64/libwayland-client.so
 implib /usr/lib64/libwayland-server.so
 implib /usr/lib64/libX11-xcb.so
+implib /usr/lib64/libX11.so
 implib /usr/lib64/libxcb.so
+
+# Implib.so can only intercept functions, while the static libXext,
+# libXfixes, libXdamage, libXcomposite, libXrender reference three Xlib
+# threading data symbols. Define them with real locks (the always-on
+# XInitThreads semantics of libX11 1.8+). The layout is private to this
+# implementation: whether the real libX11 interposes these or keeps its
+# own copies, each lock implementation only ever sees its own objects.
+cat > libX11.locks.c <<'EOF2'
+#include <pthread.h>
+
+typedef struct _LockInfoRec {
+	pthread_mutex_t mutex;
+} LockInfoRec, *LockInfoPtr;
+
+static LockInfoRec GlobalLock = { PTHREAD_MUTEX_INITIALIZER };
+
+static void LockMutex(LockInfoPtr lock) {
+	pthread_mutex_lock(&lock->mutex);
+}
+
+static void UnlockMutex(LockInfoPtr lock) {
+	pthread_mutex_unlock(&lock->mutex);
+}
+
+LockInfoPtr _Xglobal_lock = &GlobalLock;
+void (*_XLockMutex_fn)(LockInfoPtr) = LockMutex;
+void (*_XUnlockMutex_fn)(LockInfoPtr) = UnlockMutex;
+EOF2
+gcc $CFLAGS -c -o libX11.locks.o libX11.locks.c
+ar rs /usr/local/lib64/libX11.a libX11.locks.o
 
 cd ../..
 rm -rf Implib.so
@@ -899,10 +934,17 @@ EOF
 
 FROM builder AS breakpad
 RUN --mount=type=cache,target=/var/cache/ccache <<EOF
-git clone -b v2024.02.16 --depth=1 https://chromium.googlesource.com/breakpad/breakpad.git
+git init breakpad
 cd breakpad
-git clone -b v2024.02.01 --depth=1 \
-	https://chromium.googlesource.com/linux-syscall-support.git src/third_party/lss
+git remote add origin https://chromium.googlesource.com/breakpad/breakpad.git
+git fetch --depth=1 origin 9aebd3d8ef5a246deb2c929b5666aaba160ebce6
+git reset --hard FETCH_HEAD
+git init src/third_party/lss
+cd src/third_party/lss
+git remote add origin https://chromium.googlesource.com/linux-syscall-support.git
+git fetch --depth=1 origin 29164a80da4d41134950d76d55199ea33fbb9613
+git reset --hard FETCH_HEAD
+cd ../../..
 CFLAGS="$CFLAGS -fno-lto" CXXFLAGS="$CXXFLAGS -fno-lto" ./configure
 make -j$(nproc)
 make DESTDIR=/usr/src/breakpad-cache install

@@ -130,6 +130,9 @@ public:
 
 	void afterShown() override;
 	void beforeHiding() override;
+	[[nodiscard]] bool canConsumeHorizontalScroll(
+		QPoint position,
+		int delta) override;
 
 	void showSet(uint64 setId);
 	[[nodiscard]] uint64 currentSet(int yOffset) const;
@@ -149,6 +152,8 @@ public:
 	[[nodiscard]] rpl::producer<> escapes() const;
 
 	void provideRecent(const std::vector<EmojiStatusId> &customRecentList);
+
+	void setSearchRightReserved(int value);
 
 	void prepareExpanding();
 	void paintExpanding(

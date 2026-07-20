@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class History;
 class HistoryBlock;
 class HistoryItem;
+class UserData;
 struct HistoryMessageReply;
 struct PreparedServiceText;
 struct HistoryMessageReplyMarkup;
@@ -377,6 +378,15 @@ struct FakeBotAboutTop : RuntimeComponent<FakeBotAboutTop, Element> {
 	void init();
 
 	Ui::Text::String text;
+	int maxWidth = 0;
+	int height = 0;
+};
+
+struct EphemeralBadge : RuntimeComponent<EphemeralBadge, Element> {
+	void init(not_null<const HistoryItem*> item);
+
+	Ui::Text::String text;
+	UserData *receiver = nullptr;
 	int maxWidth = 0;
 	int height = 0;
 };
@@ -764,6 +774,7 @@ protected:
 	[[nodiscard]] int textHeightFor(int textWidth) const;
 	[[nodiscard]] int textRealWidth() const { return _textRealWidth; }
 	void validateText();
+	void invalidateTextSizeCache();
 	void validateTextSkipBlock(bool has, int width, int height);
 	void validateInlineKeyboard(HistoryMessageReplyMarkup *markup);
 
@@ -802,7 +813,6 @@ private:
 	}
 
 	void refreshMedia(Element *replacing);
-	void invalidateTextSizeCache();
 	void setTextWithLinks(
 		const TextWithEntities &text,
 		const std::vector<ClickHandlerPtr> &links = {});

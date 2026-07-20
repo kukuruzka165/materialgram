@@ -259,7 +259,8 @@ bool Entry::hasUnreadUnmutedForSort() const {
 	const auto state = chatListUnreadState();
 	return (state.messages > state.messagesMuted)
 		|| (state.marks > state.marksMuted)
-		|| (state.reactions > state.reactionsMuted);
+		|| (state.reactions > state.reactionsMuted)
+		|| (state.mentions > 0);
 }
 
 void Entry::updateChatListExistence() {
@@ -420,10 +421,15 @@ PositionChange Entry::adjustByPosInChatList(
 }
 
 void Entry::setChatListTimeId(TimeId date) {
-	_timeId = date;
+	const auto was = std::exchange(_timeId, date);
 	updateChatListSortPosition();
 	if (const auto folder = this->folder()) {
 		folder->updateChatListSortPosition();
+	}
+	if (was != date) {
+		if (const auto history = asHistory()) {
+			history->communityChatsListDateChanged(was);
+		}
 	}
 }
 
@@ -467,7 +473,8 @@ void Entry::removeFromChatList(
 		FilterId filterId,
 		not_null<MainList*> list) {
 	if (isPinnedDialog(filterId)) {
-		owner().setChatPinned(this, filterId, false);
+		list->pinned()->setPinned(this, false);
+		owner().notifyPinnedDialogsOrderUpdated();
 	}
 	if (filterId) {
 		const auto it = _tagColors.find(filterId);
