@@ -103,6 +103,7 @@ private:
 	void socketWritten(qint64 bytes);
 	void socketReading();
 	void newInstanceConnected();
+	int stopRunningInstance();
 
 	void readClients();
 	void removeClients();

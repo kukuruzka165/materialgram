@@ -4627,6 +4627,9 @@ void Widget::performUndoRedo(bool redo, bool allowFieldLocal) {
 		: false;
 	clearFieldUndoRedoNoopState();
 	notifyToolbarStateChanged();
+	_autosaveEvents.fire({
+		.type = AutosaveEventType::StructuralMutation,
+	});
 }
 
 void Widget::notifyToolbarStateChanged() {
@@ -5298,19 +5301,16 @@ bool Widget::handleHorizontalScrollWheel(
 	if (!_article->horizontalScrollHit(articlePoint).scrollable) {
 		return false;
 	}
-	if (horizontal) {
-		if (_horizontalScrollLock == Qt::Vertical) {
-			return false;
-		}
+	if (horizontal && _horizontalScrollLock == Qt::Vertical) {
+		return false;
+	}
+	if (horizontal || _horizontalScrollLock == Qt::Horizontal) {
 		if (_article->consumeHorizontalScroll(
 				articlePoint,
-				int(std::round(delta.x())))) {
+				int(std::round(delta.x())),
+				phase)) {
 			syncInlineFieldGeometry();
 		}
-		e->accept();
-		return true;
-	}
-	if (_horizontalScrollLock == Qt::Horizontal) {
 		e->accept();
 		return true;
 	}

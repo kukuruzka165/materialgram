@@ -495,7 +495,9 @@ private:
 	not_null<PeerData*> peer,
 	Fn<Api::SendAction()> actionFactory,
 	Fn<SendMenu::Details()> sendMenuDetails,
-	Fn<void(bool)> attach);
+	Fn<void(bool)> attach,
+	Fn<TextWithTags()> composeFieldText = nullptr,
+	Fn<void()> composeFieldMigrated = nullptr);
 
 class MenuBotIcon final : public Ui::RpWidget {
 public:

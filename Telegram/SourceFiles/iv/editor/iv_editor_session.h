@@ -18,10 +18,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class HistoryItem;
 class PeerData;
 
-namespace Data {
-struct Draft;
-} // namespace Data
-
 namespace Main {
 class Session;
 } // namespace Main
@@ -44,19 +40,29 @@ struct RichPage;
 
 namespace Iv::Editor {
 
-using ThreadFieldDraftReader = Fn<std::unique_ptr<::Data::Draft>()>;
-using ThreadFieldDraftSaver = Fn<void(std::unique_ptr<::Data::Draft>)>;
-using ThreadFieldMigratedAway = Fn<void()>;
+struct ComposeBoxOptions {
+	enum class Scope {
+		Thread,
+		Detached,
+	};
+	enum class SubmitPolicy {
+		Immediate,
+		Schedule,
+	};
 
-[[nodiscard]] bool CheckRichMessagesPremium(
-	not_null<Window::SessionController*> controller);
+	Scope scope = Scope::Thread;
+	SubmitPolicy submitPolicy = SubmitPolicy::Immediate;
+	Fn<void(TextWithTags)> returnText;
+};
+
 void ShowRichMessagesPremiumToast(std::shared_ptr<ChatHelpers::Show> show);
 [[nodiscard]] bool CanAuthorRichMessages(not_null<Main::Session*> session);
 void OfferRichMessagePremiumChoice(
 	std::shared_ptr<ChatHelpers::Show> show,
 	not_null<Main::Session*> session,
 	const RichPage &page,
-	Fn<void()> sendWithoutFormatting);
+	Fn<void()> sendWithoutFormatting,
+	bool save = false);
 void SetupSendLockBadge(
 	not_null<Ui::SendButton*> button,
 	QPoint position,
@@ -65,7 +71,10 @@ void ShowComposeBox(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer,
 	Api::SendAction action,
-	SendMenu::Details sendMenuDetails);
+	SendMenu::Details sendMenuDetails,
+	TextWithTags fieldText = {},
+	Fn<void()> onMigrated = nullptr,
+	ComposeBoxOptions options = {});
 void ShowEditBox(
 	not_null<Window::SessionController*> controller,
 	not_null<HistoryItem*> item);
@@ -84,19 +93,6 @@ void ShowEditFromFieldBox(
 	MsgId topicRootId,
 	PeerId monoforumPeerId);
 [[nodiscard]] rpl::producer<bool> FieldVisibleValue(
-	not_null<Main::Session*> session,
-	PeerId peerId,
-	MsgId topicRootId,
-	PeerId monoforumPeerId);
-void RegisterThreadFieldBridge(
-	not_null<Main::Session*> session,
-	PeerId peerId,
-	MsgId topicRootId,
-	PeerId monoforumPeerId,
-	ThreadFieldDraftReader readDraft,
-	ThreadFieldDraftSaver saveDraft,
-	ThreadFieldMigratedAway migratedAway);
-void UnregisterThreadFieldBridge(
 	not_null<Main::Session*> session,
 	PeerId peerId,
 	MsgId topicRootId,

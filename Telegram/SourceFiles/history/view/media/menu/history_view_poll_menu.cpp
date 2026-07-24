@@ -286,12 +286,11 @@ void ShowPollStatsBox(
 			loading,
 			{ .name = u"stats"_q, .sizeOverride = st::normalBoxLottieSize },
 			st::settingsBlockedListIconPadding);
-		loading->add(std::move(icon.widget));
-		auto startAnimation = std::move(icon.animate);
 		box->showFinishes(
-		) | rpl::take(1) | rpl::on_next([=]() mutable {
-			startAnimation(anim::repeat::loop);
-		}, loading->lifetime());
+		) | rpl::take(1) | rpl::on_next([animate = std::move(icon.animate)] {
+			animate(anim::repeat::loop);
+		}, icon.widget->lifetime());
+		loading->add(std::move(icon.widget));
 		loading->add(
 			object_ptr<Ui::FlatLabel>(
 				loading,

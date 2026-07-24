@@ -1172,16 +1172,9 @@ TextWithEntities Manager::ComposeReactionNotification(
 		}
 		return simple(tr::lng_reaction_document);
 	} else if (const auto contact = media->sharedContact()) {
-		const auto name = contact->firstName.isEmpty()
-			? contact->lastName
-			: contact->lastName.isEmpty()
-			? contact->firstName
-			: tr::lng_full_name(
-				tr::now,
-				lt_first_name,
-				contact->firstName,
-				lt_last_name,
-				contact->lastName);
+		const auto name = langFullName(
+			contact->firstName,
+			contact->lastName);
 		return tr::lng_reaction_contact(
 			tr::now,
 			lt_reaction,

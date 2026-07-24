@@ -201,56 +201,117 @@ QByteArray Settings::serialize() const {
 	).join(' ');
 
 	auto size = Serialize::bytearraySize(themesAccentColors)
-		+ sizeof(qint32) * 5
+		+ sizeof(qint32) // _adaptiveForWide
+		+ sizeof(qint32) // _moderateModeEnabled
+		+ sizeof(qint32) // _songVolume
+		+ sizeof(qint32) // _videoVolume
+		+ sizeof(qint32) // _askDownloadPath
 		+ Serialize::stringSize(_downloadPath.current())
 		+ Serialize::bytearraySize(_downloadPathBookmark)
-		+ sizeof(qint32) * 9
+		+ sizeof(qint32) // legacy non-default voice speed
+		+ sizeof(qint32) // _soundNotify
+		+ sizeof(qint32) // _desktopNotify
+		+ sizeof(qint32) // _flashBounceNotify
+		+ sizeof(qint32) // _notifyView
+		+ sizeof(qint32) // _nativeNotifications
+		+ sizeof(qint32) // _notificationsCount
+		+ sizeof(qint32) // _notificationsCorner
+		+ sizeof(qint32) // _autoLock
 		+ Serialize::stringSize(QString()) // legacy call output device id
 		+ Serialize::stringSize(QString()) // legacy call input device id
-		+ sizeof(qint32) * 5;
+		+ sizeof(qint32) // _callOutputVolume
+		+ sizeof(qint32) // _callInputVolume
+		+ sizeof(qint32) // _callAudioDuckingEnabled
+		+ sizeof(qint32) // _lastSeenWarningSeen
+		+ sizeof(qint32); // _soundOverrides count
 	for (const auto &[key, value] : _soundOverrides) {
 		size += Serialize::stringSize(key) + Serialize::stringSize(value);
 	}
-	size += sizeof(qint32) * 13
+	size += sizeof(qint32) // _sendFilesWay
+		+ sizeof(qint32) // _sendSubmitWay
+		+ sizeof(qint32) // _includeMutedCounter
+		+ sizeof(qint32) // _countUnreadMessages
+		+ sizeof(qint32) // legacy exe launch warning
+		+ sizeof(qint32) // _notifyAboutPinned
+		+ sizeof(qint32) // _loopAnimatedStickers
+		+ sizeof(qint32) // _largeEmoji
+		+ sizeof(qint32) // _replaceEmoji
+		+ sizeof(qint32) // _suggestEmoji
+		+ sizeof(qint32) // _suggestStickersByEmoji
+		+ sizeof(qint32) // _spellcheckerEnabled
+		+ sizeof(qint32) // _videoPlaybackSpeed
 		+ Serialize::bytearraySize(_videoPipGeometry)
-		+ sizeof(qint32)
+		+ sizeof(qint32) // _dictionariesEnabled count
 		+ (_dictionariesEnabled.current().size() * sizeof(quint64))
-		+ sizeof(qint32) * 12
+		+ sizeof(qint32) // _autoDownloadDictionaries
+		+ sizeof(qint32) // _mainMenuAccountsShown
+		+ sizeof(qint32) // _tabbedSelectorSectionEnabled
+		+ sizeof(qint32) // _floatPlayerColumn
+		+ sizeof(qint32) // _floatPlayerCorner
+		+ sizeof(qint32) // _thirdSectionInfoEnabled
+		+ sizeof(qint32) // _dialogsWithChatWidthRatio
+		+ sizeof(qint32) // _thirdColumnWidth
+		+ sizeof(qint32) // _thirdSectionExtendedBy
+		+ sizeof(qint32) // _notifyFromAll
+		+ sizeof(qint32) // _nativeWindowFrame
+		+ sizeof(qint32) // legacy system dark mode
 		+ Serialize::stringSize(_cameraDeviceId.current())
-		+ sizeof(qint32) * 2
+		+ sizeof(qint32) // _ipRevealWarning
+		+ sizeof(qint32) // _groupCallPushToTalk
 		+ Serialize::bytearraySize(_groupCallPushToTalkShortcut)
-		+ sizeof(qint64)
-		+ sizeof(qint32) * 2
+		+ sizeof(qint64) // _groupCallPushToTalkDelay
+		+ sizeof(qint32) // legacy call audio backend
+		+ sizeof(qint32) // legacy disable calls
 		+ Serialize::bytearraySize(windowPosition)
-		+ sizeof(qint32);
+		+ sizeof(qint32); // recentEmojiPreloadData count
 	for (const auto &[id, rating] : recentEmojiPreloadData) {
 		size += Serialize::stringSize(id) + sizeof(quint16);
 	}
-	size += sizeof(qint32);
+	size += sizeof(qint32); // _emojiVariants count
 	for (const auto &[id, variant] : _emojiVariants) {
 		size += Serialize::stringSize(id) + sizeof(quint8);
 	}
-	size += sizeof(qint32) * 3
+	size += sizeof(qint32) // legacy disable OpenGL
+		+ sizeof(qint32) // legacy noise suppression
+		+ sizeof(qint32) // _workMode
 		+ Serialize::bytearraySize(proxy)
-		+ sizeof(qint32) * 2
+		+ sizeof(qint32) // _hiddenGroupCallTooltips
+		+ sizeof(qint32) // _disableOpenGL
 		+ Serialize::bytearraySize(_photoEditorBrush)
-		+ sizeof(qint32) * 3
+		+ sizeof(qint32) // _groupCallNoiseSuppression
+		+ sizeof(qint32) // _voicePlaybackSpeed
+		+ sizeof(qint32) // _closeBehavior
 		+ Serialize::stringSize(_customDeviceModel.current())
-		+ sizeof(qint32) * 4
+		+ sizeof(qint32) // _playerRepeatMode
+		+ sizeof(qint32) // _playerOrderMode
+		+ sizeof(qint32) // _macWarnBeforeQuit
+		+ sizeof(qint32) // _accountsOrder count
 		+ (_accountsOrder.size() * sizeof(quint64))
-		+ sizeof(qint32) * 7
+		+ sizeof(qint32) // legacy hardware accelerated video
+		+ sizeof(qint32) // _chatQuickAction
+		+ sizeof(qint32) // _hardwareAcceleratedVideo
+		+ sizeof(qint32) // _suggestAnimatedEmoji
+		+ sizeof(qint32) // _cornerReaction
+		+ sizeof(qint32) // _translateButtonEnabled
+		+ sizeof(qint32) // skipLanguages count
 		+ (skipLanguages.size() * sizeof(quint64))
-		+ sizeof(qint32) * 2
-		+ sizeof(quint64)
-		+ sizeof(qint32) * 3
+		+ sizeof(qint32) // _rememberedDeleteMessageOnlyForYou
+		+ sizeof(qint32) // _translateChatEnabled
+		+ sizeof(quint64) // _translateToRaw
+		+ sizeof(qint32) // hideChatName
+		+ sizeof(qint32) // hideAccountName
+		+ sizeof(qint32) // hideTotalUnread
 		+ Serialize::bytearraySize(mediaViewPosition)
-		+ sizeof(qint32)
-		+ sizeof(quint64)
-		+ sizeof(qint32) * 2;
+		+ sizeof(qint32) // _ignoreBatterySaving
+		+ sizeof(quint64) // _macRoundIconDigest
+		+ sizeof(qint32) // _storiesClickTooltipHidden
+		+ sizeof(qint32); // _recentEmojiSkip count
 	for (const auto &id : _recentEmojiSkip) {
 		size += Serialize::stringSize(id);
 	}
-	size += sizeof(qint32) * 4
+	size += sizeof(qint32) // _trayIconMonochrome
+		+ sizeof(qint32) // _birthDateEnabled
+		+ sizeof(qint32) // _ttlVoiceClickTooltipHidden
 		+ Serialize::stringSize(_playbackDeviceId.current())
 		+ Serialize::stringSize(_captureDeviceId.current())
 		+ Serialize::stringSize(_callPlaybackDeviceId.current())
@@ -258,14 +319,28 @@ QByteArray Settings::serialize() const {
 		+ Serialize::bytearraySize(ivPosition)
 		+ Serialize::stringSize(noWarningExtensions)
 		+ Serialize::stringSize(_customFontFamily)
-		+ sizeof(qint32) * 3
+		+ sizeof(qint32) // _dialogsNoChatWidthRatio
+		+ sizeof(qint32) // _datacenterEnabled
+		+ sizeof(qint32) // _systemUnlockEnabled
+		+ sizeof(qint32) // _weatherInCelsius
 		+ Serialize::bytearraySize(_tonsiteStorageToken)
-		+ sizeof(qint32) * 9
-		+ sizeof(ushort)
+		+ sizeof(qint32) // _includeMutedCounterFolders
+		+ sizeof(qint32) // _chatFiltersHorizontal
+		+ sizeof(qint32) // _skipToastsInFocus
+		+ sizeof(qint32) // _recordVideoMessages
+		+ sizeof(qint32) // _videoQuality
+		+ sizeof(qint32) // _ivZoom
+		+ sizeof(qint32) // _systemDarkModeEnabled
+		+ sizeof(qint32) // _gameeEnabled
+		+ sizeof(qint32) // _quickDialogAction
+		+ sizeof(ushort) // _notificationsVolume
 		+ sizeof(qint32) // _notificationsDisplayChecksum
 		+ Serialize::bytearraySize(callPanelPosition)
-		+ sizeof(qint32) * 4;
-	size += sizeof(quint32);
+		+ sizeof(qint32) // _cornerReply
+		+ sizeof(qint32) // _systemAccentColorEnabled
+		+ sizeof(qint32) // _usePlatformTranslation
+		+ sizeof(qint32); // _systemTextReplace
+	size += sizeof(quint32); // _prefs count
 	for (const auto &[key, value] : _prefs) {
 		size += Serialize::bytearraySize(key)
 			+ Serialize::bytearraySize(value);

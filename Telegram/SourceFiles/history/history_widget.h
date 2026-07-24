@@ -707,16 +707,14 @@ private:
 
 	void unregisterDraftSources();
 	void registerDraftSource();
-	void unregisterThreadFieldBridge();
-	void registerThreadFieldBridge();
+	void untrackThreadFieldVisibility();
+	void trackThreadFieldVisibility();
 	[[nodiscard]] Data::Draft *cloudDraft() const;
 	[[nodiscard]] std::shared_ptr<const Iv::RichPage> shownRichMessage() const;
 	[[nodiscard]] bool isComposeBoxOpen() const;
 	[[nodiscard]] bool hasEditDraft() const;
 	[[nodiscard]] bool bypassNormalDraftHandling() const;
 	[[nodiscard]] bool shouldShowRichDraftPreview() const;
-	[[nodiscard]] std::unique_ptr<Data::Draft> readThreadFieldDraft() const;
-	void saveThreadFieldDraft(std::unique_ptr<Data::Draft> draft);
 	void migrateFieldToRichEditor();
 	void setHistory(History *history);
 	void setEditMsgId(MsgId msgId);
@@ -983,7 +981,7 @@ private:
 	bool _saveDraftText = false;
 	base::Timer _saveDraftTimer;
 	base::Timer _saveCloudDraftTimer;
-	rpl::lifetime _threadFieldBridgeLifetime;
+	rpl::lifetime _threadFieldVisibleLifetime;
 
 	HistoryView::InfoTooltip _topToast;
 	HistoryView::AnchoredTooltip _hiddenSenderTooltip;

@@ -540,6 +540,18 @@ void ActivateOtherProcess(uint64 processId, uint64 windowId) {
 	}
 }
 
+bool WaitForProcessExit(uint64 processId, crl::time timeout) {
+	const auto process = ::OpenProcess(
+		SYNCHRONIZE,
+		FALSE,
+		DWORD(processId));
+	if (!process) {
+		return (::GetLastError() == ERROR_INVALID_PARAMETER);
+	}
+	const auto guard = gsl::finally([&] { ::CloseHandle(process); });
+	return (::WaitForSingleObject(process, DWORD(timeout)) == WAIT_OBJECT_0);
+}
+
 } // namespace Platform
 
 namespace {

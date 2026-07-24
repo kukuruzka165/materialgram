@@ -2281,6 +2281,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_community_chats_viewable" = "Chats you can view";
 "lng_community_chats_requestable" = "Hidden chats";
 "lng_community_add_chat" = "Add a Chat to Community";
+"lng_community_add_chat_title" = "Add a Chat to Community";
+"lng_community_create_chat" = "Create a New Chat";
 "lng_community_requests_title" = "Pending Requests";
 "lng_community_requests_about" = "Chats require admin approval before they're added to the community. {link}";
 "lng_community_requests_about_link" = "Change Settings.";
@@ -7452,6 +7454,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_article_premium_choice_about" = "This message uses rich formatting, which requires {link}.";
 "lng_article_premium_choice_about_link" = "Telegram Premium";
 "lng_article_premium_choice_plain" = "Send Without Formatting";
+"lng_article_premium_choice_plain_save" = "Save Without Formatting";
 "lng_article_table_change" = "Change Table";
 "lng_article_table_add_cells" = "Add Cells";
 "lng_article_table_add_row_above" = "Add Row Above";

@@ -1619,12 +1619,7 @@ TextForMimeData MediaContact::clipboardText() const {
 	const auto text = u"[ "_q
 		+ tr::lng_in_dlg_contact(tr::now)
 		+ u" ]\n"_q
-		+ tr::lng_full_name(
-			tr::now,
-			lt_first_name,
-			_contact.firstName,
-			lt_last_name,
-			_contact.lastName).trimmed()
+		+ langFullName(_contact.firstName, _contact.lastName)
 		+ '\n'
 		+ _contact.phoneNumber;
 	return TextForMimeData::Simple(text);

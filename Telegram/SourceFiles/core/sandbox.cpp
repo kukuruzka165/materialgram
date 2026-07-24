@@ -49,6 +49,9 @@ base::options::toggle OptionDeadlockDetector({
 	.description = "Check once every 30 seconds that main thread is still responsive.",
 });
 
+constexpr auto kCleanupIpcTimeout = 10 * crl::time(1000);
+constexpr auto kCleanupQuitTimeout = 30 * crl::time(1000);
+
 } // namespace
 
 const char kOptionDeadlockDetector[] = "deadlock-detector";
@@ -65,15 +68,22 @@ Sandbox::Sandbox(int &argc, char **argv)
 }
 
 int Sandbox::start() {
-	if (!Core::UpdaterDisabled()) {
-		_updateChecker = std::make_unique<Core::UpdateChecker>();
-	}
-
 	{
 		const auto d = QFile::encodeName(QDir(cWorkingDir()).absolutePath());
 		char h[33] = { 0 };
 		hashMd5Hex(d.constData(), d.size(), h);
 		_localServerName = Platform::SingleInstanceLocalServerName(h);
+	}
+
+	if (cLaunchMode() == LaunchModeCleanup) {
+		const auto result = stopRunningInstance();
+		psCleanup();
+		closeApplication();
+		return result;
+	}
+
+	if (!Core::UpdaterDisabled()) {
+		_updateChecker = std::make_unique<Core::UpdateChecker>();
 	}
 
 	{
@@ -169,6 +179,48 @@ int Sandbox::start() {
 	}
 	_started = true;
 	return exec();
+}
+
+int Sandbox::stopRunningInstance() {
+	LOG(("Cleanup: connecting to %1...").arg(_localServerName));
+	_localSocket.connectToServer(_localServerName);
+	if (!_localSocket.waitForConnected(int(kCleanupIpcTimeout))) {
+		if (_localSocket.error() == QLocalSocket::ServerNotFoundError) {
+			LOG(("Cleanup: no running instance found."));
+			return 0;
+		}
+		LOG(("Cleanup: connect error %1.").arg(_localSocket.error()));
+		return 1;
+	}
+	_localSocket.write("CMD:quit;");
+	if (!_localSocket.waitForBytesWritten(int(kCleanupIpcTimeout))) {
+		LOG(("Cleanup: could not send the quit command."));
+		return 1;
+	}
+	auto response = QByteArray();
+	const auto deadline = crl::now() + kCleanupIpcTimeout;
+	while (!response.contains(';')) {
+		const auto timeout = deadline - crl::now();
+		if (timeout <= 0 || !_localSocket.waitForReadyRead(int(timeout))) {
+			LOG(("Cleanup: no response to the quit command."));
+			return 1;
+		}
+		response.append(_localSocket.readAll());
+	}
+	const auto match = QRegularExpression(u"RES:(\\d+)_(\\d+);"_q).match(
+		QString::fromLatin1(response));
+	if (!match.hasMatch()) {
+		LOG(("Cleanup: bad response to the quit command."));
+		return 1;
+	}
+	const auto processId = match.capturedView(1).toULongLong();
+	LOG(("Cleanup: waiting for process %1 to quit...").arg(processId));
+	if (!Platform::WaitForProcessExit(processId, kCleanupQuitTimeout)) {
+		LOG(("Cleanup: the process did not quit in time."));
+		return 1;
+	}
+	LOG(("Cleanup: the running instance quit."));
+	return 0;
 }
 
 void Sandbox::NotifySystemShuttingDown() {

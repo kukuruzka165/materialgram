@@ -4467,11 +4467,13 @@ void ApiWrap::sendRichMessage(
 				Api::UnixtimeFromMsgId(response.outerMsgId));
 		}
 	};
-	const auto richDraftOrigin = Data::FileOrigin(Data::FileOriginCloudDraft{
-		.peerId = peer->id,
-		.topicRootId = draftTopicRootId,
-		.monoforumPeerId = draftMonoforumPeerId,
-	});
+	const auto richDraftOrigin = clearCloudDraft
+		? Data::FileOrigin(Data::FileOriginCloudDraft{
+			.peerId = peer->id,
+			.topicRootId = draftTopicRootId,
+			.monoforumPeerId = draftMonoforumPeerId,
+		})
+		: Data::FileOrigin();
 	const auto serializeCurrent = [=]() -> std::optional<MTPInputRichMessage> {
 		const auto fullPage = item->fullRichPage();
 		const auto page = fullPage ? fullPage : item->richPage();
@@ -4490,18 +4492,22 @@ void ApiWrap::sendRichMessage(
 	const auto itemId = item->fullId();
 	const auto recoverRichFailure = [=](const QString &type) {
 		if (const auto failed = _session->data().message(itemId)) {
-			const auto fullPage = failed->fullRichPage();
-			if (const auto page = fullPage ? fullPage : failed->richPage()) {
-				auto draft = Data::Draft();
-				draft.reply.topicRootId = draftTopicRootId;
-				draft.reply.monoforumPeerId = draftMonoforumPeerId;
-				draft.richMessage = page;
-				draft.richMessageSummary = failed->originalText();
-				history->createCloudDraft(
-					draftTopicRootId,
-					draftMonoforumPeerId,
-					&draft);
-				history->applyCloudDraft(draftTopicRootId, draftMonoforumPeerId);
+			if (clearCloudDraft) {
+				const auto fullPage = failed->fullRichPage();
+				if (const auto page = fullPage ? fullPage : failed->richPage()) {
+					auto draft = Data::Draft();
+					draft.reply.topicRootId = draftTopicRootId;
+					draft.reply.monoforumPeerId = draftMonoforumPeerId;
+					draft.richMessage = page;
+					draft.richMessageSummary = failed->originalText();
+					history->createCloudDraft(
+						draftTopicRootId,
+						draftMonoforumPeerId,
+						&draft);
+					history->applyCloudDraft(
+						draftTopicRootId,
+						draftMonoforumPeerId);
+				}
 			}
 			if (randomId) {
 				_session->data().unregisterMessageRandomId(randomId);

@@ -107,6 +107,7 @@ private:
 	bool listIsLessInOrder(
 		not_null<HistoryItem*> first,
 		not_null<HistoryItem*> second) override;
+	bool listInvertedOrder() override;
 	void listSelectionChanged(
 		HistoryView::SelectedItems &&items) override;
 	void listMarkReadTill(not_null<HistoryItem*> item) override;
@@ -567,13 +568,17 @@ bool ListWidget::Inner::listIsLessInOrder(
 		not_null<HistoryItem*> first,
 		not_null<HistoryItem*> second) {
 	if (first->isRegular() && second->isRegular()) {
-		return first->id < second->id;
+		return first->id > second->id;
 	} else if (first->isRegular()) {
-		return true;
-	} else if (second->isRegular()) {
 		return false;
+	} else if (second->isRegular()) {
+		return true;
 	}
-	return first->id < second->id;
+	return first->id > second->id;
+}
+
+bool ListWidget::Inner::listInvertedOrder() {
+	return true;
 }
 
 void ListWidget::Inner::listSelectionChanged(
@@ -896,11 +901,10 @@ bool ListWidget::Inner::cornerButtonsIgnoreVisibility() {
 }
 
 std::optional<bool> ListWidget::Inner::cornerButtonsDownShown() {
-	const auto top = _scroll->scrollTop() + st::historyToDownShownAfter;
-	if (top < _scroll->scrollTopMax()) {
+	if (_scroll->scrollTop() > st::historyToDownShownAfter) {
 		return true;
-	} else if (_list->loadedAtBottomKnown()) {
-		return !_list->loadedAtBottom();
+	} else if (_list->loadedAtTopKnown()) {
+		return !_list->loadedAtTop();
 	}
 	return std::nullopt;
 }

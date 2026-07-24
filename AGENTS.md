@@ -21,7 +21,7 @@ wsl.exe -d {distro} --cd /home/{user}/Telegram/tdesktop -- <command>
 - For WSL/Linux builds, use the Docker build entry point from the repository root: `Telegram/build/docker/centos_env/build_debug.sh`. The Docker daemon must be reachable from WSL; checking `docker info` is fine, but do not start a build unless the user asked for one.
 - Existing build outputs may be Linux binaries, for example `out/Debug/Telegram` as an ELF executable, not `Telegram.exe`. Verify the build tree before assuming which platform produced it.
 - Be careful with text file line endings. In a WSL/Linux checkout, files should remain LF-only unless the file already uses another convention. CRLF finishing applies only to native, non-WSL Windows runs/checkouts. Do not let PowerShell or Windows tools silently rewrite WSL files to CRLF. If a file becomes mixed, normalize it back to the convention appropriate for the current checkout, without adding a UTF-8 BOM.
-- When using the local `task-think` skill from this WSL checkout, keep `.ai/...` artifacts and edited project text files LF-only. Treat the skill's Windows text-normalization phase as not applicable to WSL, except to record that line endings were checked and kept LF/no-BOM. Run CRLF normalization for `task-think` only in a native, non-WSL Windows checkout.
+- When using the local `perform-task` skill from this WSL checkout, keep external AI task artifacts and edited project text files LF-only. Treat its Windows text-normalization phase as not applicable to WSL, except to record that line endings were checked and kept LF/no-BOM. Run CRLF normalization only in a native, non-WSL Windows checkout.
 
 ## Build System Structure
 
@@ -94,6 +94,53 @@ Ensure the repository is in `L:\Telegram\tdesktop`. The build system requires `.
 ### Build fails with "wrong command prompt"
 On Windows, use the correct Visual Studio Native Tools Command Prompt matching your target (x64/x86/ARM64).
 
+### macOS crashes while reading the cached language pack
+
+After an incremental Xcode build that regenerated `lang.strings` outputs, the
+app can link a new generated key lookup with stale objects that still use an
+older `kKeysCount`. The characteristic failure is:
+
+- the Debug log stops immediately after
+  `Lang Info: Loaded cached, keys: ...`;
+- stderr and `tdata/working` may be empty;
+- a fresh `~/Library/Logs/DiagnosticReports/Telegram-*.ips` shows `SIGABRT`
+  from `std::vector<unsigned char>::operator[]`, then
+  `Lang::Instance::applyValue()`, `fillFromSerialized()`, and
+  `Local::readLangPack()`.
+
+If this exact startup failure repeats twice, do not change the implementation,
+test overlay, or portable account. Stop only this checkout's exact Telegram
+process. Because Xcode's `CONFIGURATION_BUILD_DIR` is `out/Debug`, make a
+safety copy of every existing portable folder outside `out/` before cleaning:
+
+```bash
+portable_backup_root="$(mktemp -d "${TMPDIR:-/tmp}/tdesktop-portable-clean.XXXXXX")"
+for portable_name in \
+  TelegramForcePortable \
+  test_TelegramForcePortable \
+  real_TelegramForcePortable; do
+  if [ -d "out/Debug/$portable_name" ]; then
+    ditto "out/Debug/$portable_name" "$portable_backup_root/$portable_name"
+  fi
+done
+```
+
+Require every expected backup copy to exist before continuing. Then perform
+one full Xcode Debug clean and rebuild:
+
+```bash
+cmake --build out --config Debug --target clean
+cmake --build out --config Debug --target Telegram
+```
+
+Afterward, restore a portable folder from the backup only when its original
+path is missing; never overwrite a folder that survived the clean. Verify all
+three original folder names that existed before the clean are present, keep
+the backup until the rebuilt app completes one successful launch, and record
+its path if the run stops before verification. Then rerun the same test once.
+If the signature persists after that clean rebuild, continue normal crash
+diagnosis or report the blocker. Do not loop clean rebuilds.
+
 ### Build fails with PDB or EXE access errors
 
 **âš ï¸ CRITICAL: DO NOT RETRY THE BUILD. STOP AND WAIT FOR USER.**
@@ -132,9 +179,14 @@ Retrying builds wastes time and context. The ONLY fix is for the user to close t
 ## Commits
 
 - Subject: one concise, plain-language line summarizing the change, ~50-60 characters, matching the style of recent `git log` subjects. This is usually the entire message.
-- Add a short plain-language body only when the subject can't carry it (what was done, not the technical how) — a line or two at most.
+- For ordinary work not associated with an AI task, add a short plain-language body only when the subject can't carry it (what was done, not the technical how) — a line or two at most.
 - Never add a `Co-Authored-By:` line or any tool/assistant attribution trailer.
-- Never add `Autotask:`/attempt or other workflow markers — commits read like normal history.
+- Never add `Autotask:`/attempt or other internal run markers. A commit owned by
+  an `ai-tdesktop` task has exactly three lines: the concise subject, a blank
+  line, and `Task: <task-id>`. Do not add a body. Keep rationale and
+  implementation notes out of the commit message; put a short durable note
+  under `tasks/<task-id>.md` only when useful. Do not copy commit hashes into
+  that note or any AI task artifact; the task id is the cross-repository link.
 
 ## Local Storage Serialization
 

@@ -161,6 +161,7 @@ public:
 	void setCurrentPeer(PeerData *peer);
 	void provideRecentEmoji(
 		const std::vector<EmojiStatusId> &customRecentList);
+	void setMarkedCustomIds(const base::flat_set<DocumentId> &ids);
 	void setSearchRightReserved(int value);
 
 	void hideFinished();

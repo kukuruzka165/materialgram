@@ -1109,6 +1109,16 @@ void TabbedSelector::provideRecentEmoji(
 	}
 }
 
+void TabbedSelector::setMarkedCustomIds(
+		const base::flat_set<DocumentId> &ids) {
+	for (const auto &tab : _tabs) {
+		if (tab.type() == SelectorTab::Emoji) {
+			const auto emoji = static_cast<EmojiListWidget*>(tab.widget());
+			emoji->setMarkedCustomIds(ids);
+		}
+	}
+}
+
 void TabbedSelector::checkRestrictedPeer() {
 	if (_currentPeer) {
 		const auto error = (_currentTabType == SelectorTab::Stickers)

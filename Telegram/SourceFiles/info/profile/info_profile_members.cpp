@@ -106,6 +106,10 @@ rpl::producer<bool> Members::groupByRoleAvailableValue() const {
 	return _listController->groupByRoleAvailableValue();
 }
 
+rpl::producer<bool> Members::rowsVisibleValue() const {
+	return _rowsVisible.value();
+}
+
 std::unique_ptr<MembersState> Members::saveState() {
 	auto result = std::make_unique<MembersState>();
 	result->list = _listController->saveState();
@@ -477,6 +481,9 @@ void Members::visibleTopBottomUpdated(
 		int visibleTop,
 		int visibleBottom) {
 	setChildVisibleTopBottom(_list, visibleTop, visibleBottom);
+	const auto top = _list->y();
+	_rowsVisible = (visibleBottom > top)
+		&& (visibleTop < top + _list->height());
 }
 
 void Members::peerListSetTitle(rpl::producer<QString> title) {

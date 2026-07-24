@@ -742,9 +742,11 @@ void CalendarBox::Inner::loadDynamicImages() {
 			state.requested = true;
 			_dynamicImageForDate(
 				date,
-				[=](QDate imageDate, std::shared_ptr<DynamicImage> image) {
+				crl::guard(this, [=](
+						QDate imageDate,
+						std::shared_ptr<DynamicImage> image) {
 					setDynamicImage(imageDate, std::move(image));
-				});
+				}));
 		}
 	}
 }
@@ -1072,7 +1074,9 @@ void CalendarBox::Inner::setDynamicImage(
 	auto &state = _dynamicImageStates[date];
 	if (image) {
 		state.image = std::move(image);
-		state.image->subscribeToUpdates([=] { update(); });
+		state.image->subscribeToUpdates(crl::guard(this, [=] {
+			update();
+		}));
 	} else {
 		_dynamicImageStates.remove(date);
 	}

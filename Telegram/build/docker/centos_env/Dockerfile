@@ -160,7 +160,7 @@ RUN <<EOF
 git init patches
 cd patches
 git remote add origin https://github.com/desktop-app/patches.git
-git fetch --depth=1 origin 701cfb4b3d6612188d168f198c842114fd64726f
+git fetch --depth=1 origin 5c6549de54d24aa11bff0968b92fae06afe5b168
 git reset --hard FETCH_HEAD
 rm -rf .git
 EOF
@@ -664,7 +664,7 @@ COPY --link --from=xv /usr/src/xv-cache /
 COPY --link --from=nv-codec-headers /usr/src/nv-codec-headers-cache /
 
 RUN --mount=type=cache,target=/var/cache/ccache <<EOF
-git clone -b n6.1.1 --depth=1 https://github.com/FFmpeg/FFmpeg.git
+git clone -b n6.1.6 --depth=1 https://github.com/FFmpeg/FFmpeg.git
 cd FFmpeg
 ./configure \
 	--extra-cflags="-fno-lto -DCONFIG_SAFE_BITSTREAM_READER=1" \

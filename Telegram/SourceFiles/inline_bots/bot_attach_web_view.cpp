@@ -2922,7 +2922,9 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		not_null<PeerData*> peer,
 		Fn<Api::SendAction()> actionFactory,
 		Fn<SendMenu::Details()> sendMenuDetails,
-		Fn<void(bool)> attach) {
+		Fn<void(bool)> attach,
+		Fn<TextWithTags()> composeFieldText,
+		Fn<void()> composeFieldMigrated) {
 	auto result = std::make_unique<Ui::DropdownMenu>(
 		parent,
 		st::dropdownMenuWithIcons);
@@ -2992,7 +2994,13 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				return;
 			}
 			const auto details = sendMenuDetails();
-			Iv::Editor::ShowComposeBox(controller, peer, action, details);
+			Iv::Editor::ShowComposeBox(
+				controller,
+				peer,
+				action,
+				details,
+				composeFieldText ? composeFieldText() : TextWithTags(),
+				composeFieldMigrated);
 		}, &st::menuIconArticle);
 	}
 	const auto session = &controller->session();

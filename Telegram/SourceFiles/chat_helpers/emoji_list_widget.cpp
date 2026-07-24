@@ -504,6 +504,7 @@ EmojiListWidget::EmojiListWidget(
 , _freeEffects(std::move(descriptor.freeEffects))
 , _customTextColor(std::move(descriptor.customTextColor))
 , _overBg(st::emojiPanRadius, st().overBg)
+, _markedBg(st::emojiPanRadius, st::stickersEmojiPickerSelectedBg)
 , _premiumMark(std::make_unique<StickerPremiumMark>(
 	&session(),
 	st::emojiPremiumLock))
@@ -1471,6 +1472,13 @@ void EmojiListWidget::provideRecent(
 	resizeToWidth(width());
 }
 
+void EmojiListWidget::setMarkedCustomIds(base::flat_set<DocumentId> ids) {
+	if (_markedCustomIds != ids) {
+		_markedCustomIds = std::move(ids);
+		update();
+	}
+}
+
 void EmojiListWidget::repaintCustom(uint64 setId) {
 	if (!_repaintsScheduled.emplace(setId).second) {
 		return;
@@ -2294,11 +2302,20 @@ void EmojiListWidget::paintSearchShortcutIcon(
 		Painter &p,
 		const CustomSet &set,
 		QRect rect) {
-	if (set.list.empty() || _customSingleSize <= 0) {
+	if (set.list.empty()) {
 		return;
 	}
-	const auto native = _customSingleSize;
-	const auto scale = double(rect.width()) / double(native);
+	using SizeTag = Data::CustomEmojiManager::SizeTag;
+	const auto native = Data::FrameSizeFromTag(SizeTag::Isolated)
+		/ style::DevicePixelRatio();
+	if (!set.shortcutIcon) {
+		const auto document = set.list.front().document;
+		set.shortcutIcon = document->owner().customEmojiManager().create(
+			document,
+			[=] { update(); },
+			SizeTag::Isolated);
+	}
+	const auto scale = rect.width() / float64(native);
 	auto context = Ui::Text::CustomEmojiPaintContext{
 		.textColor = (_customTextColor
 			? _customTextColor()
@@ -2312,10 +2329,11 @@ void EmojiListWidget::paintSearchShortcutIcon(
 		.internal = { .forceFirstFrame = true },
 	};
 	p.save();
+	auto hq = PainterHighQualityEnabler(p);
 	p.translate(rect.center());
 	p.scale(scale, scale);
 	p.translate(-native / 2, -native / 2);
-	set.list.front().custom->paint(p, context);
+	set.shortcutIcon->paint(p, context);
 	p.restore();
 }
 
@@ -2482,6 +2500,7 @@ void EmojiListWidget::paint(
 					const auto selected = (state == _selected)
 						|| (!_picker->isHidden()
 							&& state == _pickerSelected);
+					const auto marked = customMarked(info.section, index);
 					const auto position = QPoint(
 						_rowsLeft + j * _singleSize.width(),
 						info.rowsTop + i * _singleSize.height()
@@ -2508,13 +2527,14 @@ void EmojiListWidget::paint(
 						continue;
 					}
 					if (!_grabbingChosen
-						&& selected
-						&& st().overBg->c.alpha() > 0) {
+						&& (marked || (selected && st().overBg->c.alpha() > 0))) {
 						auto tl = w;
 						if (rtl()) {
 							tl.setX(width() - tl.x() - st::emojiPanArea.width());
 						}
-						_overBg.paint(p, QRect(tl, st::emojiPanArea));
+						(marked ? _markedBg : _overBg).paint(
+							p,
+							QRect(tl, st::emojiPanArea));
 					}
 					if (_searchMode && info.section == 0) {
 						drawRecent(p, context, w, _searchResults[index]);
@@ -2731,6 +2751,14 @@ EmojiListWidget::ResolvedCustom EmojiListWidget::lookupCustomEmoji(
 		return { entry.document, entry.collectible };
 	}
 	return {};
+}
+
+bool EmojiListWidget::customMarked(int section, int index) const {
+	if (_markedCustomIds.empty()) {
+		return false;
+	}
+	const auto custom = lookupCustomEmoji(index, section);
+	return custom && _markedCustomIds.contains(custom.document->id);
 }
 
 EmojiPtr EmojiListWidget::lookupOverEmoji(const OverEmoji *over) const {

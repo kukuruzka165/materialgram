@@ -259,6 +259,14 @@ ivSummaryAudioIcon: IconEmoji {
 	icon: icon {{ "menu/rich/audio-18x18", dialogsTextFg }};
 	padding: margins(0px, 1px, 3px, 0px);
 }
+ivSummaryTaskCheckedIcon: IconEmoji {
+	icon: icon {{ "menu/rich/task_checked-18x18", dialogsTextFg }};
+	padding: margins(0px, 1px, 1px, 0px);
+}
+ivSummaryTaskUncheckedIcon: IconEmoji {
+	icon: icon {{ "menu/rich/task_unchecked-18x18", dialogsTextFg }};
+	padding: margins(0px, 1px, 1px, 0px);
+}
 ivSummaryLocationIcon: IconEmoji {
 	icon: icon {{ "menu/rich/location-18x18", dialogsTextFg }};
 	padding: margins(0px, 1px, 3px, 0px);
@@ -988,7 +996,6 @@ defaultMarkdown: Markdown {
 }
 messageMarkdownBodyStyle: TextStyle(messageTextStyle) {
 	font: font(13px);
-	lineHeight: 20px;
 }
 messageMarkdownCodeStyle: TextStyle(defaultMarkdownCodeStyle) {
 	font: font(13px);
@@ -1042,7 +1049,7 @@ messageMarkdownAudioTitleStyle: TextStyle(messageMarkdownBodyStyle) {
 messageMarkdownAudioSubtitleStyle: TextStyle(messageMarkdownDetailsSummaryStyle) {
 }
 messageMarkdownBlockSkips: MarkdownBlockSkips {
-	paragraph: 8px;
+	paragraph: 4px;
 	heading: 10px;
 	code: 8px;
 	rule: 8px;

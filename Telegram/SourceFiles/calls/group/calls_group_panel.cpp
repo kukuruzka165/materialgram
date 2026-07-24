@@ -249,7 +249,11 @@ Panel::Panel(not_null<GroupCall*> call, ConferencePanelMigration info)
 	nullptr,
 	_call->messages()->idUpdates(),
 	_call->canManageValue(),
-	_call->messagesEnabledValue()))
+	_call->messagesEnabledValue(),
+	[=](QPoint globalPosition) {
+		return _messageField
+			&& _messageField->ownsReactionPanelInput(globalPosition);
+	}))
 , _toasts(std::make_unique<Toasts>(this))
 , _controlsBackgroundColor([] {
 	auto result = st::groupCallBg->c;

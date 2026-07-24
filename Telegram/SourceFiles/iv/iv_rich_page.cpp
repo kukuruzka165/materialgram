@@ -2011,27 +2011,37 @@ void AppendSummaryBlock(
 		auto ordered = OrderedListSequenceStart(block);
 		const auto step = block.orderedList.reversed ? -1 : 1;
 		for (const auto &item : block.listItems) {
-			auto prefix = QString();
 			const auto orderedValue = item.number.value.value_or(ordered);
-			if (item.taskState == TaskState::Unchecked) {
-				prefix = u"[ ] "_q;
-			} else if (item.taskState == TaskState::Checked) {
-				prefix = u"[x] "_q;
-			} else if (block.listKind == ListKind::Ordered) {
-				const auto marker = OrderedMarkerText(
-					block.orderedList,
-					item.number,
-					ordered);
-				prefix = marker.isEmpty() ? QString() : (marker + u" "_q);
+			const auto task = (item.taskState != TaskState::None);
+			auto line = tr::marked();
+			if (withIcons && task) {
+				line = Ui::Text::IconEmoji(
+					item.taskState == TaskState::Checked
+						? &st::ivSummaryTaskCheckedIcon
+						: &st::ivSummaryTaskUncheckedIcon);
 			} else {
-				prefix = u"- "_q;
+				auto prefix = QString();
+				if (item.taskState == TaskState::Unchecked) {
+					prefix = u"[ ] "_q;
+				} else if (item.taskState == TaskState::Checked) {
+					prefix = u"[x] "_q;
+				} else if (block.listKind == ListKind::Ordered) {
+					const auto marker = OrderedMarkerText(
+						block.orderedList,
+						item.number,
+						ordered);
+					prefix = marker.isEmpty()
+						? QString()
+						: (marker + u" "_q);
+				} else {
+					prefix = u"- "_q;
+				}
+				line = tr::marked(prefix);
 			}
-			if (!item.text.text.empty()) {
-				AppendSummaryLine(result, item.text, withIcons, prefix);
-			} else {
-				auto nested = FlattenSummaryBlocks(item.blocks, withIcons);
-				AppendSummaryLine(result, std::move(nested), withIcons, prefix);
-			}
+			line.append(item.text.text.empty()
+				? FlattenSummaryBlocks(item.blocks, withIcons)
+				: item.text.text);
+			AppendSummaryLine(result, std::move(line), withIcons);
 			if (block.listKind == ListKind::Ordered) {
 				ordered = orderedValue + step;
 			}
@@ -2144,9 +2154,15 @@ void AppendSummaryBlock(
 		return;
 	case BlockKind::Table:
 		if (withIcons) {
-			AppendSummaryLine(result, Ui::Text::IconEmoji(
+			auto line = block.text.text;
+			TextUtilities::Trim(line);
+			if (!line.empty()) {
+				line.append(QChar(' '));
+			}
+			line.append(Ui::Text::IconEmoji(
 				&st::ivSummaryTableIcon,
-				tr::lng_in_dlg_table(tr::now)), withIcons);
+				tr::lng_in_dlg_table(tr::now)));
+			AppendSummaryLine(result, std::move(line), withIcons);
 		} else if (!block.text.text.empty()) {
 			AppendSummaryLine(result, block.text, withIcons);
 		} else {
@@ -2404,8 +2420,31 @@ std::shared_ptr<const RichPage> ParseRichPage(
 TextWithEntities FlattenRichPageSummary(
 		const RichPage &page,
 		bool emptyFallback) {
-	auto result = FlattenSummaryBlocks(page.blocks, true);
+	auto result = tr::marked();
+	auto contributionCount = 0;
+	const Block *soleTable = nullptr;
+	for (const auto &block : page.blocks) {
+		const auto previousSize = result.text.size();
+		AppendSummaryBlock(&result, block, true);
+		if (result.text.size() == previousSize) {
+			continue;
+		}
+		++contributionCount;
+		if (block.kind == BlockKind::Table) {
+			soleTable = &block;
+		}
+	}
 	TextUtilities::Trim(result);
+	if (contributionCount == 1 && soleTable) {
+		auto title = soleTable->text.text;
+		TextUtilities::Trim(title);
+		if (title.empty()) {
+			auto line = Ui::Text::IconEmoji(&st::ivSummaryTableIcon);
+			line.append(tr::lng_in_dlg_table(tr::now));
+			result = tr::marked();
+			AppendSummaryLine(&result, std::move(line), true);
+		}
+	}
 	if (result.empty() && emptyFallback) {
 		result = TextWithEntities::Simple(tr::lng_message_empty(tr::now));
 	}

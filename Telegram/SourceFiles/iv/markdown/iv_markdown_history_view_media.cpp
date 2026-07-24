@@ -23,11 +23,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <unordered_set>
 
 #include "settings.h"
+#include "ui/effects/animations.h"
 #include "ui/image/image_location.h"
 #include "data/data_types.h"
+#include "data/data_auto_download.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
 #include "data/data_file_click_handler.h"
+#include "data/data_media_preload.h"
 #include "data/data_photo.h"
+#include "data/data_photo_media.h"
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -39,6 +44,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_message.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/media/history_view_media_grouped.h"
+#include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "ui/basic_click_handlers.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
@@ -51,6 +58,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Iv::Markdown {
 namespace {
+
+constexpr auto kSlideshowSlideDuration = crl::time(200);
+constexpr auto kSlideshowCommitRatio = 0.3;
+constexpr auto kSlideshowWheelStep = 60.;
+constexpr auto kSlideshowWheelResetDelay = crl::time(300);
+constexpr auto kSlideshowVelocityWindow = crl::time(100);
+constexpr auto kSlideshowCommitVelocity = 0.5;
 
 class IvHistoryViewDelegate final : public HistoryView::SimpleElementDelegate {
 public:
@@ -750,6 +764,10 @@ public:
 
 	void setActiveItemIndex(int index) override;
 
+	[[nodiscard]] bool canHandleHorizontalScroll() const override;
+
+	bool handleHorizontalScroll(int delta, Qt::ScrollPhase phase) override;
+
 private:
 	[[nodiscard]] bool alive() const override;
 
@@ -759,9 +777,46 @@ private:
 
 	void applyForcedSize();
 
+	void applyForcedSizeFor(not_null<HistoryView::Media*> media);
+
 	void ensureNavigationLinks();
 
 	void stepActiveIndex(int delta);
+
+	void startTransition(int from, int direction, float64 progress = 0.);
+
+	[[nodiscard]] bool gestureActive() const;
+	void adoptTransitionOffset();
+	void beginDrag();
+	void applyDragDelta(int delta);
+	void finishDrag();
+	void commitDrag(int direction);
+	void revertDrag();
+	void cancelDrag();
+	bool handleMomentum(int delta);
+	void handlePhaselessScroll(int delta);
+	void registerDragSample(float64 offsetDelta);
+	[[nodiscard]] float64 takeDragVelocity();
+
+	struct DragSample {
+		crl::time time = 0;
+		float64 delta = 0.;
+	};
+
+	struct SlidePreload {
+		std::shared_ptr<::Data::PhotoMedia> photo;
+		std::shared_ptr<::Data::DocumentMedia> document;
+		std::unique_ptr<::Data::VideoPreload> video;
+		bool ready = false;
+	};
+
+	[[nodiscard]] int slideIndexAfter(int index, int delta) const;
+	[[nodiscard]] bool activeSlideReady() const;
+	[[nodiscard]] bool preloadReady(int index);
+	void startPreload(int index);
+	void releaseSlideRuntimes(int index);
+	void refreshResidency();
+	void updatePreloads();
 
 	[[nodiscard]] IvHistoryViewHit classifyState(
 		const HistoryView::TextState &state,
@@ -769,6 +824,13 @@ private:
 		int index) const;
 
 	[[nodiscard]] IvHistoryViewHit resolveHit(QPoint point) const;
+
+	void paintSlide(
+		Painter &p,
+		const MarkdownArticlePaintContext &context,
+		QRect visible,
+		not_null<HistoryView::Media*> media,
+		int shift) const;
 
 	[[nodiscard]] bool probeSupport();
 
@@ -788,6 +850,7 @@ private:
 		std::shared_ptr<DocumentRuntime>> _groupedDocumentRuntimes;
 	const base::flat_map<uint64, int> _groupedItemIndices;
 	const base::flat_set<uint64> _groupedSpoileredIds;
+	const ::Data::FileOrigin _fileOrigin;
 	const bool _editMode = false;
 	std::vector<std::unique_ptr<HistoryView::Media>> _slides;
 	std::vector<QSize> _slideOriginalSizes;
@@ -797,10 +860,24 @@ private:
 	ClickHandlerPtr _previousLink;
 	ClickHandlerPtr _nextLink;
 	int _activeIndex = 0;
+	Ui::Animations::Simple _slideAnimation;
+	int _transitionFrom = -1;
+	int _transitionDirection = 0;
+	float64 _dragOffset = 0.;
+	bool _dragActive = false;
+	bool _dragReverting = false;
+	bool _momentumIgnore = false;
+	std::vector<DragSample> _dragSamples;
+	float64 _wheelAccumulated = 0.;
+	crl::time _wheelLastTime = 0;
 	int _requestedWidth = 0;
 	bool _supported = false;
 	MediaBlockHost *_registeredBridgeHost = nullptr;
 	mutable SlideshowDotsBackdrop _dotsBackdrop;
+	base::flat_map<int, SlidePreload> _preloads;
+	rpl::lifetime _downloadLifetime;
+	int _residencyIndex = -1;
+	bool _painted = false;
 
 };
 
@@ -814,6 +891,7 @@ IvHistoryViewSlideshowBlock::IvHistoryViewSlideshowBlock(
 , _groupedDocumentRuntimes(std::move(descriptor.groupedDocuments))
 , _groupedItemIndices(std::move(descriptor.groupedItemIndices))
 , _groupedSpoileredIds(std::move(descriptor.groupedSpoileredIds))
+, _fileOrigin(descriptor.fileOrigin)
 , _editMode(descriptor.editMode)
 , _slideOriginalSizes(std::move(descriptor.slideOriginalSizes)) {
 	_slides.reserve(descriptor.slideMediaFactories.size());
@@ -830,6 +908,12 @@ IvHistoryViewSlideshowBlock::IvHistoryViewSlideshowBlock(
 		return;
 	}
 	_supported = probeSupport();
+	if (_supported && _slides.size() > 1) {
+		_host->session()->session().downloaderTaskFinished(
+		) | rpl::on_next([=] {
+			updatePreloads();
+		}, _downloadLifetime);
+	}
 }
 
 IvHistoryViewSlideshowBlock::~IvHistoryViewSlideshowBlock() {
@@ -879,14 +963,8 @@ int IvHistoryViewSlideshowBlock::resizeGetHeight(int width) {
 	return frameHeight(_requestedWidth);
 }
 
-void IvHistoryViewSlideshowBlock::applyForcedSize() {
-	if (_geometry.isEmpty() || !alive()) {
-		return;
-	}
-	const auto media = activeMedia();
-	if (!media) {
-		return;
-	}
+void IvHistoryViewSlideshowBlock::applyForcedSizeFor(
+		not_null<HistoryView::Media*> media) {
 	const auto runtime = _host->view()->Get<
 		HistoryView::InstantViewMediaRuntime>();
 	const auto guard = gsl::finally([&] {
@@ -900,6 +978,30 @@ void IvHistoryViewSlideshowBlock::applyForcedSize() {
 		runtime->forcedFor = media;
 	}
 	media->resizeGetHeight(_geometry.width());
+}
+
+void IvHistoryViewSlideshowBlock::applyForcedSize() {
+	if (_geometry.isEmpty() || !alive()) {
+		return;
+	}
+	if (const auto media = activeMedia()) {
+		applyForcedSizeFor(media);
+	}
+	const auto count = int(_slides.size());
+	if (_dragOffset != 0.) {
+		const auto entering = slideIndexAfter(
+			_activeIndex,
+			(_dragOffset > 0.) ? 1 : -1);
+		if (const auto media = _slides[entering].get()) {
+			applyForcedSizeFor(media);
+		}
+	}
+	if (_transitionFrom < 0 || _transitionFrom >= count) {
+		return;
+	}
+	if (const auto media = _slides[_transitionFrom].get()) {
+		applyForcedSizeFor(media);
+	}
 }
 
 void IvHistoryViewSlideshowBlock::setGeometry(QRect geometry) {
@@ -942,9 +1044,11 @@ MediaBlockSelectionData IvHistoryViewSlideshowBlock::selectionData() const {
 }
 
 bool IvHistoryViewSlideshowBlock::hasHeavyPart() const {
-	return alive() && ranges::any_of(_slides, [](const auto &media) {
-		return media && media->hasHeavyPart();
-	});
+	return alive()
+		&& (!_preloads.empty()
+			|| ranges::any_of(_slides, [](const auto &media) {
+				return media && media->hasHeavyPart();
+			}));
 }
 
 void IvHistoryViewSlideshowBlock::unloadHeavyPart() {
@@ -952,6 +1056,25 @@ void IvHistoryViewSlideshowBlock::unloadHeavyPart() {
 		return;
 	}
 	const auto had = hasHeavyPart();
+	_slideAnimation.stop();
+	_transitionFrom = -1;
+	_transitionDirection = 0;
+	_dragActive = false;
+	_dragOffset = 0.;
+	_dragReverting = false;
+	_momentumIgnore = false;
+	_dragSamples.clear();
+	_wheelAccumulated = 0.;
+	_wheelLastTime = 0;
+	_preloads.clear();
+	_residencyIndex = -1;
+	_painted = false;
+	for (const auto &[id, runtime] : _groupedPhotoRuntimes) {
+		runtime->releaseHeavyData();
+	}
+	for (const auto &[id, runtime] : _groupedDocumentRuntimes) {
+		runtime->releaseHeavyData();
+	}
 	for (const auto &media : _slides) {
 		if (media) {
 			media->unloadHeavyPart();
@@ -995,9 +1118,53 @@ void IvHistoryViewSlideshowBlock::setActiveItemIndex(int index) {
 	if (next == _activeIndex) {
 		return;
 	}
+	cancelDrag();
+	const auto from = _activeIndex;
 	_activeIndex = next;
-	applyForcedSize();
+	startTransition(from, (next > from) ? 1 : -1);
+	updatePreloads();
 	requestRepaint(_geometry);
+}
+
+bool IvHistoryViewSlideshowBlock::canHandleHorizontalScroll() const {
+	return alive() && (_slides.size() > 1);
+}
+
+bool IvHistoryViewSlideshowBlock::handleHorizontalScroll(
+		int delta,
+		Qt::ScrollPhase phase) {
+	if (!alive() || _slides.size() < 2 || _geometry.isEmpty()) {
+		return false;
+	}
+	switch (phase) {
+	case Qt::NoScrollPhase:
+		if (gestureActive()) {
+			finishDrag();
+		}
+		handlePhaselessScroll(delta);
+		return true;
+	case Qt::ScrollBegin:
+		if (gestureActive()) {
+			finishDrag();
+		}
+		beginDrag();
+		applyDragDelta(delta);
+		return true;
+	case Qt::ScrollUpdate:
+		if (!_dragActive) {
+			beginDrag();
+		}
+		applyDragDelta(delta);
+		return true;
+	case Qt::ScrollEnd:
+		if (_dragActive) {
+			finishDrag();
+		}
+		return true;
+	case Qt::ScrollMomentum:
+		return handleMomentum(delta);
+	}
+	return false;
 }
 
 void IvHistoryViewSlideshowBlock::ensureNavigationLinks() {
@@ -1028,9 +1195,359 @@ void IvHistoryViewSlideshowBlock::stepActiveIndex(int delta) {
 	if (next == _activeIndex) {
 		return;
 	}
+	cancelDrag();
+	const auto from = _activeIndex;
 	_activeIndex = next;
+	startTransition(from, (delta > 0) ? 1 : -1);
+	updatePreloads();
+	requestRepaint(_geometry);
+}
+
+bool IvHistoryViewSlideshowBlock::gestureActive() const {
+	return _dragActive || (_dragOffset != 0.);
+}
+
+void IvHistoryViewSlideshowBlock::adoptTransitionOffset() {
+	if (!_slideAnimation.animating() || _transitionFrom < 0) {
+		return;
+	}
+	_dragOffset = -_transitionDirection
+		* _geometry.width()
+		* (1. - _slideAnimation.value(1.));
+	_slideAnimation.stop();
+	_transitionFrom = -1;
+	_transitionDirection = 0;
+	_residencyIndex = -1;
+	_dragReverting = false;
+}
+
+void IvHistoryViewSlideshowBlock::beginDrag() {
+	adoptTransitionOffset();
+	_dragReverting = false;
+	_dragActive = true;
+	_momentumIgnore = false;
+	_dragSamples.clear();
+}
+
+void IvHistoryViewSlideshowBlock::applyDragDelta(int delta) {
+	const auto width = _geometry.width();
+	registerDragSample(-delta);
+	_dragOffset = std::clamp(_dragOffset - delta, -1. * width, 1. * width);
 	applyForcedSize();
 	requestRepaint(_geometry);
+}
+
+void IvHistoryViewSlideshowBlock::finishDrag() {
+	const auto direction = (_dragOffset > 0.)
+		? 1
+		: (_dragOffset < 0.)
+		? -1
+		: 0;
+	_dragActive = false;
+	_momentumIgnore = true;
+	const auto velocity = takeDragVelocity();
+	const auto fast = style::ConvertFloatScale(kSlideshowCommitVelocity);
+	const auto towards = velocity * direction;
+	const auto threshold = _geometry.width() * kSlideshowCommitRatio;
+	const auto commit = (direction != 0)
+		&& ((towards >= fast)
+			|| ((std::abs(_dragOffset) >= threshold) && (towards > -fast)));
+	if (commit) {
+		commitDrag(direction);
+	} else {
+		revertDrag();
+	}
+}
+
+void IvHistoryViewSlideshowBlock::registerDragSample(float64 offsetDelta) {
+	const auto now = crl::now();
+	while (!_dragSamples.empty()
+		&& (now - _dragSamples.front().time > kSlideshowVelocityWindow)) {
+		_dragSamples.erase(_dragSamples.begin());
+	}
+	_dragSamples.push_back({ now, offsetDelta });
+}
+
+float64 IvHistoryViewSlideshowBlock::takeDragVelocity() {
+	const auto samples = base::take(_dragSamples);
+	const auto now = crl::now();
+	auto total = 0.;
+	auto oldest = now;
+	auto count = 0;
+	for (const auto &sample : samples) {
+		if (now - sample.time > kSlideshowVelocityWindow) {
+			continue;
+		}
+		oldest = std::min(oldest, sample.time);
+		total += sample.delta;
+		++count;
+	}
+	const auto duration = now - oldest;
+	return (count < 2 || duration <= 0) ? 0. : (total / duration);
+}
+
+void IvHistoryViewSlideshowBlock::commitDrag(int direction) {
+	const auto width = std::max(_geometry.width(), 1);
+	const auto progress = std::clamp(std::abs(_dragOffset) / width, 0., 1.);
+	_dragOffset = 0.;
+	const auto from = _activeIndex;
+	_activeIndex = slideIndexAfter(_activeIndex, direction);
+	startTransition(from, direction, progress);
+	updatePreloads();
+	requestRepaint(_geometry);
+}
+
+void IvHistoryViewSlideshowBlock::revertDrag() {
+	const auto offset = base::take(_dragOffset);
+	if (offset == 0. || _geometry.width() <= 0) {
+		requestRepaint(_geometry);
+		updatePreloads();
+		return;
+	}
+	const auto direction = (offset > 0.) ? 1 : -1;
+	_dragReverting = true;
+	startTransition(
+		slideIndexAfter(_activeIndex, direction),
+		-direction,
+		1. - std::abs(offset) / _geometry.width());
+}
+
+void IvHistoryViewSlideshowBlock::cancelDrag() {
+	_dragActive = false;
+	_dragOffset = 0.;
+	_dragReverting = false;
+	_momentumIgnore = false;
+	_dragSamples.clear();
+}
+
+bool IvHistoryViewSlideshowBlock::handleMomentum(int delta) {
+	if (_dragActive) {
+		// On Windows a fling delivers momentum events right away,
+		// without any ScrollEnd between the finger-driven scroll and
+		// the inertial one, so the first momentum event is the earliest
+		// sign that the fingers were lifted - decide here and ignore
+		// the rest of the fling.
+		registerDragSample(-delta);
+		finishDrag();
+		return true;
+	}
+	return _momentumIgnore;
+}
+
+void IvHistoryViewSlideshowBlock::handlePhaselessScroll(int delta) {
+	const auto now = crl::now();
+	const auto incoming = float64(-delta);
+	if (!_wheelLastTime
+		|| (now - _wheelLastTime > kSlideshowWheelResetDelay)
+		|| (incoming * _wheelAccumulated < 0.)) {
+		_wheelAccumulated = 0.;
+	}
+	_wheelAccumulated += incoming;
+	_wheelLastTime = now;
+	const auto step = style::ConvertFloatScale(kSlideshowWheelStep);
+	while (std::abs(_wheelAccumulated) >= step) {
+		const auto direction = (_wheelAccumulated > 0.) ? 1 : -1;
+		_wheelAccumulated -= direction * step;
+		stepActiveIndex(direction);
+	}
+}
+
+void IvHistoryViewSlideshowBlock::startTransition(
+		int from,
+		int direction,
+		float64 progress) {
+	if (_geometry.isEmpty() || !_painted) {
+		applyForcedSize();
+		return;
+	}
+	_transitionFrom = from;
+	_transitionDirection = direction;
+	applyForcedSize();
+	_slideAnimation.stop();
+	_slideAnimation.start([=] {
+		requestRepaint(_geometry);
+	}, progress, 1., kSlideshowSlideDuration, anim::easeOutCirc);
+	_slideAnimation.setFinishedCallback([=] {
+		_transitionFrom = -1;
+		_transitionDirection = 0;
+		_dragReverting = false;
+		_residencyIndex = -1;
+		requestRepaint(_geometry);
+		updatePreloads();
+	});
+}
+
+int IvHistoryViewSlideshowBlock::slideIndexAfter(
+		int index,
+		int delta) const {
+	const auto count = int(_slides.size());
+	return ((index + delta) % count + count) % count;
+}
+
+bool IvHistoryViewSlideshowBlock::activeSlideReady() const {
+	const auto media = activeMedia();
+	if (!media) {
+		return false;
+	}
+	if (const auto photo = media->getPhoto()) {
+		const auto view = photo->activeMediaView();
+		return view && view->loaded();
+	} else if (const auto document = media->getDocument()) {
+		const auto view = document->activeMediaView();
+		return view && view->canBePlayed();
+	}
+	return false;
+}
+
+bool IvHistoryViewSlideshowBlock::preloadReady(int index) {
+	const auto i = _preloads.find(index);
+	if (i == end(_preloads)) {
+		return false;
+	}
+	auto &entry = i->second;
+	if (!entry.ready) {
+		if (entry.photo && entry.photo->loaded()) {
+			entry.ready = true;
+		} else if (entry.document
+			&& !entry.video
+			&& entry.document->canBePlayed()) {
+			entry.ready = true;
+		}
+	}
+	return entry.ready;
+}
+
+void IvHistoryViewSlideshowBlock::startPreload(int index) {
+	const auto media = _slides[index].get();
+	auto &entry = _preloads[index];
+	if (const auto photo = media->getPhoto()) {
+		entry.photo = photo->createMediaView();
+		if (entry.photo->loaded()) {
+			entry.ready = true;
+		} else if (::Data::PhotoPreload::Should(
+				photo,
+				_host->item()->history()->peer)) {
+			photo->load(_fileOrigin, LoadFromCloudOrLocal, true);
+		} else {
+			entry.photo->wanted(::Data::PhotoSize::Small, _fileOrigin);
+			entry.ready = true;
+		}
+	} else if (const auto document = media->getDocument()) {
+		entry.document = document->createMediaView();
+		entry.document->goodThumbnailWanted();
+		entry.document->thumbnailWanted(_fileOrigin);
+		const auto autoplay = ::Data::AutoDownload::ShouldAutoPlay(
+			document->session().settings().autoDownload(),
+			_host->item()->history()->peer,
+			document);
+		if (!autoplay) {
+			entry.document->videoThumbnailWanted(_fileOrigin);
+		}
+		if (::Data::VideoPreload::Can(document)) {
+			const auto weak = std::weak_ptr<IvHistoryViewSlideshowBlock>(
+				std::static_pointer_cast<IvHistoryViewSlideshowBlock>(
+					shared_from_this()));
+			entry.video = std::make_unique<::Data::VideoPreload>(
+				document,
+				_fileOrigin,
+				[weak, index] {
+					if (const auto block = weak.lock()) {
+						const auto i = block->_preloads.find(index);
+						if (i != end(block->_preloads)) {
+							i->second.ready = true;
+						}
+						block->updatePreloads();
+					}
+				});
+		} else if (entry.document->canBePlayed()) {
+			entry.ready = true;
+		} else {
+			entry.document->automaticLoad(_fileOrigin, _host->item());
+			if (!document->loading()) {
+				entry.ready = true;
+			}
+		}
+	} else {
+		entry.ready = true;
+	}
+}
+
+void IvHistoryViewSlideshowBlock::releaseSlideRuntimes(int index) {
+	for (const auto &[mediaId, itemIndex] : _groupedItemIndices) {
+		if (itemIndex != index) {
+			continue;
+		}
+		const auto photo = _groupedPhotoRuntimes.find(mediaId);
+		if (photo != end(_groupedPhotoRuntimes)) {
+			photo->second->releaseHeavyData();
+		}
+		const auto document = _groupedDocumentRuntimes.find(mediaId);
+		if (document != end(_groupedDocumentRuntimes)) {
+			document->second->releaseHeavyData();
+		}
+	}
+}
+
+void IvHistoryViewSlideshowBlock::refreshResidency() {
+	const auto count = int(_slides.size());
+	if (!alive() || !count) {
+		return;
+	}
+	_residencyIndex = _activeIndex;
+	if (count < 2) {
+		return;
+	}
+	const auto next = slideIndexAfter(_activeIndex, 1);
+	const auto previous = slideIndexAfter(_activeIndex, -1);
+	for (auto i = 0; i != count; ++i) {
+		if (i == _activeIndex || i == next || i == previous) {
+			continue;
+		}
+		const auto media = _slides[i].get();
+		if (media && media->hasHeavyPart()) {
+			media->unloadHeavyPart();
+		}
+		releaseSlideRuntimes(i);
+		_preloads.remove(i);
+	}
+	for (const auto index : { next, previous }) {
+		if (index != _activeIndex) {
+			if (const auto media = _slides[index].get()) {
+				media->stopAnimation();
+			}
+		}
+	}
+}
+
+void IvHistoryViewSlideshowBlock::updatePreloads() {
+	const auto count = int(_slides.size());
+	if (!_painted || !alive() || count < 2) {
+		return;
+	}
+	if (_residencyIndex != _activeIndex
+		&& _transitionFrom < 0
+		&& !gestureActive()) {
+		refreshResidency();
+	}
+	if (!activeSlideReady()) {
+		return;
+	}
+	const auto next = slideIndexAfter(_activeIndex, 1);
+	if (next == _activeIndex) {
+		return;
+	}
+	if (!_preloads.contains(next)) {
+		startPreload(next);
+	}
+	if (!preloadReady(next)) {
+		return;
+	}
+	const auto previous = slideIndexAfter(_activeIndex, -1);
+	if (previous != _activeIndex
+		&& previous != next
+		&& !_preloads.contains(previous)) {
+		startPreload(previous);
+	}
 }
 
 IvHistoryViewHit IvHistoryViewSlideshowBlock::classifyState(
@@ -1120,6 +1637,21 @@ bool IvHistoryViewSlideshowBlock::probeSupport() {
 	return true;
 }
 
+void IvHistoryViewSlideshowBlock::paintSlide(
+		Painter &p,
+		const MarkdownArticlePaintContext &context,
+		QRect visible,
+		not_null<HistoryView::Media*> media,
+		int shift) const {
+	p.save();
+	const auto origin = _geometry.topLeft() + QPoint(shift, 0);
+	p.translate(origin);
+	auto local = context.translated(-origin);
+	local.clip = visible.translated(-origin);
+	media->draw(p, local);
+	p.restore();
+}
+
 void IvHistoryViewSlideshowBlock::paint(
 		Painter &p,
 		const MarkdownArticlePaintContext &context) const {
@@ -1138,12 +1670,57 @@ void IvHistoryViewSlideshowBlock::paint(
 		RoundedRectPath(_geometry, st.radius),
 		Qt::IntersectClip);
 
-	p.save();
-	p.translate(_geometry.topLeft());
-	auto local = context.translated(-_geometry.topLeft());
-	local.clip = visible.translated(-_geometry.topLeft());
-	media->draw(p, local);
-	p.restore();
+	const auto count = int(_slides.size());
+	const auto transition = _slideAnimation.animating()
+		&& (_transitionFrom >= 0)
+		&& (_transitionFrom < count)
+		&& (_transitionFrom != _activeIndex);
+	const auto dragging = !transition && (_dragOffset != 0.);
+	if (transition) {
+		const auto progress = _slideAnimation.value(1.);
+		const auto width = _geometry.width();
+		const auto direction = _transitionDirection;
+		const auto shift = anim::interpolate(
+			0,
+			-direction * width,
+			progress);
+		if (const auto outgoing = _slides[_transitionFrom].get()) {
+			paintSlide(p, context, visible, outgoing, shift);
+		}
+		paintSlide(p, context, visible, media, shift + direction * width);
+		if (progress > 1.) {
+			const auto filler = _slides[slideIndexAfter(
+				_activeIndex,
+				direction)].get();
+			if (filler) {
+				paintSlide(
+					p,
+					context,
+					visible,
+					filler,
+					shift + 2 * direction * width);
+			}
+		}
+	} else if (dragging) {
+		const auto width = _geometry.width();
+		const auto offset = int(std::round(
+			std::clamp(_dragOffset, -1. * width, 1. * width)));
+		const auto direction = (offset > 0) ? 1 : -1;
+		paintSlide(p, context, visible, media, -offset);
+		const auto entering = _slides[slideIndexAfter(
+			_activeIndex,
+			direction)].get();
+		if (entering) {
+			paintSlide(
+				p,
+				context,
+				visible,
+				entering,
+				-offset + direction * width);
+		}
+	} else {
+		paintSlide(p, context, visible, media, 0);
+	}
 
 	if (_slides.size() >= 2) {
 		if (!_previousRect.isEmpty()) {
@@ -1164,18 +1741,24 @@ void IvHistoryViewSlideshowBlock::paint(
 				active ? st.navButtonBgOver : st.navButtonBg,
 				active ? st.navNextIconOver : st.navNextIcon);
 		}
+		const auto dotsIndex = (transition && !_dragReverting)
+			? _transitionFrom
+			: _activeIndex;
 		PaintSlideshowDots(
 			p,
 			ComputeSlideshowDots(
 				_geometry,
 				int(_slides.size()),
-				_activeIndex,
+				dotsIndex,
 				st),
-			_activeIndex,
+			dotsIndex,
 			st,
 			_dotsBackdrop);
 	}
 	p.restore();
+	const auto that = const_cast<IvHistoryViewSlideshowBlock*>(this);
+	that->_painted = true;
+	that->updatePreloads();
 }
 
 ClickHandlerPtr IvHistoryViewSlideshowBlock::linkAt(QPoint point) const {

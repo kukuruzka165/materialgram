@@ -130,6 +130,7 @@ namespace {
 		.recordMediaMessage = !videoStream,
 		.editMessageStars = videoStream,
 		.emojiOnlyPanel = videoStream,
+		.richEditor = false,
 	};
 }
 

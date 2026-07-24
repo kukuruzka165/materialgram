@@ -422,6 +422,9 @@ bool EphemeralMessages::trySend(const Api::MessageToSend &message) {
 UserData *EphemeralMessages::findCommandBot(
 		not_null<PeerData*> peer,
 		const QString &text) const {
+	if (!peer->isChat() && !peer->isMegagroup()) {
+		return nullptr;
+	}
 	const auto parsed = ParseCommand(text);
 	if (!parsed) {
 		return nullptr;
