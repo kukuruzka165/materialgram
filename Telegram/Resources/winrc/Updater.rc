@@ -35,8 +35,8 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 6,7,7,1
- PRODUCTVERSION 6,7,7,1
+ FILEVERSION 7,0,5,1
+ PRODUCTVERSION 7,0,5,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -53,10 +53,10 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "kukuruzka"
             VALUE "FileDescription", "materialgram Updater"
-            VALUE "FileVersion", "6.7.7.1"
+            VALUE "FileVersion", "7.0.5.1"
             VALUE "LegalCopyright", "github.com/kukuruzka165/materialgram"
             VALUE "ProductName", "materialgram"
-            VALUE "ProductVersion", "6.7.7.1"
+            VALUE "ProductVersion", "7.0.5.1"
         END
     END
     BLOCK "VarFileInfo"

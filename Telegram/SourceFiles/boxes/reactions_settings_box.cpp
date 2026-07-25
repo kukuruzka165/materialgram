@@ -246,7 +246,6 @@ int StripPreview::resizeGetHeight(int newWidth) {
 		+ st::reactionCornerShadow.top()
 		+ st::reactStripHeight
 		+ st::reactionCornerShadow.bottom()
-		+ _st.icons.stripBubble.height()
 		+ padding.bottom()
 		+ margin.bottom();
 }
@@ -333,16 +332,6 @@ void StripPreview::paintEvent(QPaintEvent *e) {
 	const auto inner = innerRect();
 	const auto outer = inner.marginsAdded(st::reactionCornerShadow);
 	p.drawImage(outer.topLeft(), _pillCache);
-
-	const auto &bubble = _st.icons.stripBubble;
-	const auto bubbleRight = std::min(
-		st::reactStripBubbleRight,
-		(inner.width() - bubble.width()) / 2);
-	bubble.paint(
-		p,
-		inner.x() + inner.width() - bubbleRight - bubble.width(),
-		inner.y() + inner.height(),
-		width());
 
 	auto hq = PainterHighQualityEnabler(p);
 	const auto count = std::min(int(_list.size()), _columns);

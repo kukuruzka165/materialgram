@@ -1,3 +1,33 @@
+7.0.5.1 (24.07.26)
+
+- Official changelog:
+- Rich Text Editor.
+- Telegram Communities.
+- Invisible Bot Messages.
+- Rich Text Formatting for Bots.
+- Guardian Bots for Group Chats.
+- Links in Poll Options.
+- Viewer for Markdown files in .md format.
+- Instant View that's really instant.
+- Get answers from AI bots in any chat by tagging their @username.
+- Connect a bot to your profile with the new Chat Automation.
+- Custom AI styles in text editor with cloud-based tones and sharing.
+- Advanced emoji and stickers search by keywords.
+- Poll statistics chart and subscriber/country-based vote restrictions.
+- Delete specific reactions and restrict reactions in groups.
+- Image editor improvements: brush size, text style cycling, sticker quality.
+- Fix tg:// link handling on cold start and login widget window activation.
+- Copy and paste formatting to and from HTML.
+- Proxy auto-rotation option.
+- Allow seeking in video messages.
+- Styled text items with emoji support in image editor.
+- Wheel zoom and middle-button panning in image editor.
+- Manage owned custom emoji packs and delete owned sticker sets.
+- Add-to-Sticker-Set and Add-to-Emoji-Set submenus for foreign packs.
+- Reply header with preview in send files box.
+- Bring back original video quality option.
+- Screen reader support for language list and country select box.
+
 6.7.7.1 (22.04.26)
 
 - Better platform detection for photos and profile photos
