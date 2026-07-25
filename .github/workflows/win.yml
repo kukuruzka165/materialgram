@@ -79,6 +79,19 @@ jobs:
           Remove-Item vs_buildtools.exe -Force
           if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
 
+      - name: Install ATL.
+        if: matrix.arch != 'arm64'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          $installPath = & $vswhere -latest -products * -property installationPath
+          $p = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList `
+            'modify','--installPath',"`"$installPath`"", `
+            '--quiet','--wait','--norestart','--nocache', `
+            '--add','Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL'
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
+
       - uses: Eden-CI/msvc-dev-cmd@master
         name: Native Tools Command Prompt.
         with:
