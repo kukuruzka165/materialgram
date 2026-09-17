@@ -724,6 +724,37 @@ void ChooseFromFile(
 		crl::guard(parent, callback));
 }
 
+void ChooseThemeFromFile(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> parent) {
+	auto filters = QStringList(
+		u"Theme files (*.tdesktop-theme *.tdesktop-palette)"_q);
+	filters.push_back(FileDialog::AllFilesFilter());
+	const auto callback = crl::guard(controller, [=](
+			const FileDialog::OpenResult &result) {
+		if (result.paths.isEmpty()) {
+			return;
+		}
+		const auto filePath = result.paths.front();
+		const auto hasExtension = [&](QLatin1String extension) {
+			return filePath.endsWith(extension, Qt::CaseInsensitive);
+		};
+		if (!hasExtension(qstr(".tdesktop-theme"))
+			&& !hasExtension(qstr(".tdesktop-palette"))) {
+			return;
+		}
+		if (!Window::Theme::Apply(filePath)) {
+			controller->show(Ui::MakeInformBox(
+				tr::lng_theme_preview_invalid(tr::now)));
+		}
+	});
+	FileDialog::GetOpenPath(
+		parent.get(),
+		tr::lng_settings_load_theme_from_file(tr::now),
+		filters.join(u";;"_q),
+		crl::guard(parent, callback));
+}
+
 void SetupSupportSwitchSettings(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
@@ -1350,6 +1381,10 @@ void Chat::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 	createTheme->setProperty(
 		"highlight-control-id",
 		u"chat/themes-create"_q);
+	addAction(
+		tr::lng_settings_load_theme_from_file(tr::now),
+		[=] { ChooseThemeFromFile(controller(), controller()->window().widget()); },
+		&st::menuIconPalette);
 }
 
 void Chat::setupContent() {

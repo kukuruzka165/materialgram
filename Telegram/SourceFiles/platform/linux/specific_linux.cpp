@@ -462,6 +462,37 @@ bool GenerateServiceFile(bool silent = false) {
 	return true;
 }
 
+void InstallMimeTypes() {
+	const auto targetFile = QStandardPaths::writableLocation(
+		QStandardPaths::GenericDataLocation)
+		+ u"/mime/packages/"_q
+		+ QGuiApplication::desktopFileName()
+		+ u".xml"_q;
+	QFile source(u":/misc/io.github.kukuruzka165.materialgram.mime.xml"_q);
+	const auto contents = source.open(QIODevice::ReadOnly)
+		? source.readAll()
+		: QByteArray();
+	if (contents.isEmpty()) {
+		return;
+	}
+	QFile current(targetFile);
+	if (current.open(QIODevice::ReadOnly)
+		&& current.readAll() == contents) {
+		return;
+	}
+	QDir().mkpath(QFileInfo(targetFile).path());
+	QFile::remove(targetFile);
+	if (QFile::copy(
+			u":/misc/io.github.kukuruzka165.materialgram.mime.xml"_q,
+			targetFile)) {
+		DEBUG_LOG(("App Info: Mime definition installed."));
+	}
+
+	const auto mimePath = QStandardPaths::writableLocation(
+		QStandardPaths::GenericDataLocation) + u"/mime"_q;
+	QProcess::execute("update-mime-database", { mimePath });
+}
+
 void InstallLauncher() {
 	static const auto DisabledByEnv = !qEnvironmentVariableIsEmpty(
 		"DESKTOPINTEGRATION");
@@ -479,6 +510,7 @@ void InstallLauncher() {
 
 	GenerateDesktopFile(applicationsPath);
 	GenerateServiceFile();
+	InstallMimeTypes();
 
 	const auto icons = QStandardPaths::writableLocation(
 		QStandardPaths::GenericDataLocation) + u"/icons/"_q;

@@ -776,6 +776,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_bg_remove" = "Remove wallpaper";
 "lng_settings_bg_theme_edit" = "Edit theme";
 "lng_settings_bg_theme_create" = "Create new theme";
+"lng_settings_load_theme_from_file" = "Load theme from file";
 "lng_settings_bg_cloud_themes" = "Custom themes";
 "lng_settings_bg_show_all" = "Show all themes";
 "lng_settings_bg_tile" = "Tile background";

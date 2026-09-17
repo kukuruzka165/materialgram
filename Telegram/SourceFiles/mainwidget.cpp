@@ -2993,8 +2993,26 @@ void MainWidget::handleStartFiles(
 		}
 	}
 	if (!paths.isEmpty()) {
+		auto themePaths = QStringList();
+		auto sendList = QStringList();
+		for (const auto &path : paths) {
+			if (path.endsWith(u".tdesktop-theme"_q, Qt::CaseInsensitive)
+				|| path.endsWith(u".tdesktop-palette"_q, Qt::CaseInsensitive)) {
+				themePaths.push_back(path);
+			} else {
+				sendList.push_back(path);
+			}
+		}
+		if (!themePaths.isEmpty()
+			&& !Window::Theme::Apply(themePaths.front())) {
+			_controller->show(Ui::MakeInformBox(
+				tr::lng_theme_preview_invalid(tr::now)));
+		}
+		if (sendList.isEmpty()) {
+			return;
+		}
 		const auto chosen = [=](not_null<Data::Thread*> thread) {
-			return sendPaths(thread, paths);
+			return sendPaths(thread, sendList);
 		};
 		Window::ShowChooseRecipientBox(_controller, chosen);
 	}
