@@ -654,7 +654,10 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			| (data.is_fake() ? Flag::Fake : Flag())
 			| (data.is_bot_inline_geo() ? Flag::BotInlineGeo : Flag())
 			| (data.is_bot_forum_view() ? Flag::Forum : Flag())
-			| (data.is_premium() ? Flag::Premium : Flag())
+			| (data.is_premium()
+				|| result->isSelf()
+				? Flag::Premium
+				: Flag())
 			| (data.is_support() ? Flag::Support : Flag())
 			| (hasRequirePremiumToWrite
 				? (Flag::HasRequirePremiumToWrite
