@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
+#include "data/data_forum_topic.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/cached_round_corners.h"
@@ -94,7 +95,7 @@ bool Panel::preventAutoHide() const {
 void Panel::updateControlsGeometry() {
 	const auto scrollTop = contentTop();
 	const auto width = contentWidth();
-	const auto scrollHeight = qMax(
+	const auto scrollHeight = std::max(
 		height() - scrollTop - contentBottom() - scrollMarginBottom(),
 		0);
 	if (scrollHeight > 0) {
@@ -127,7 +128,10 @@ void Panel::updateSize() {
 		listHeight = widget->height();
 	}
 	auto scrollVisible = (listHeight > 0);
-	auto scrollHeight = scrollVisible ? (qMin(listHeight, st::mediaPlayerListHeightMax) + st::mediaPlayerListMarginBottom) : 0;
+	auto scrollHeight = scrollVisible
+		? (std::min(listHeight, st::mediaPlayerListHeightMax)
+			+ st::mediaPlayerListMarginBottom)
+		: 0;
 	height += scrollHeight + contentBottom();
 	resize(width, height);
 	_scroll->setVisible(scrollVisible);
@@ -232,6 +236,7 @@ void Panel::ensureCreated() {
 void Panel::refreshList() {
 	const auto current = instance()->current(AudioMsgId::Type::Song);
 	const auto contextId = current.contextId();
+	const auto context = instance()->playlistContext(AudioMsgId::Type::Song);
 	auto savedMusicItem = false;
 	const auto peer = [&]() -> PeerData* {
 		if (const auto document = current.audio()) {
@@ -247,9 +252,7 @@ void Panel::refreshList() {
 		const auto document = media ? media->document() : nullptr;
 		if (!document
 			|| !document->isSharedMediaMusic()
-			|| (!item->isRegular()
-				&& !item->isScheduled()
-				&& !item->isSavedMusicItem())) {
+			|| !IsRealPlaybackContext(item)) {
 			return nullptr;
 		}
 		savedMusicItem = item->isSavedMusicItem();
@@ -262,17 +265,32 @@ void Panel::refreshList() {
 	const auto migrated = peer ? peer->migrateFrom() : nullptr;
 	const auto listPeer = savedMusicItem ? nullptr : peer;
 	const auto listMusicPeer = savedMusicItem ? peer : nullptr;
-	const auto listMigratedPeer = savedMusicItem ? nullptr : migrated;
+	const auto listTopicRootId = savedMusicItem
+		? MsgId()
+		: context.topicRootId;
+	const auto listSublistPeerId = savedMusicItem
+		? PeerId()
+		: context.monoforumPeerId;
+	const auto scoped = listTopicRootId || listSublistPeerId;
+	const auto listMigratedPeer = (savedMusicItem || scoped)
+		? nullptr
+		: migrated;
 	if (_listPeer != listPeer
 		|| _listMusicPeer != listMusicPeer
-		|| _listMigratedPeer != listMigratedPeer) {
+		|| _listMigratedPeer != listMigratedPeer
+		|| _listTopicRootId != listTopicRootId
+		|| _listSublistPeerId != listSublistPeerId) {
 		_scroll->takeWidget<QWidget>().destroy();
 		_listPeer = _listMusicPeer = _listMigratedPeer = nullptr;
+		_listTopicRootId = MsgId();
+		_listSublistPeerId = PeerId();
 	}
 	if ((listPeer && !_listPeer) || (listMusicPeer && !_listMusicPeer)) {
 		_listPeer = listPeer;
 		_listMusicPeer = listMusicPeer;
 		_listMigratedPeer = listMigratedPeer;
+		_listTopicRootId = listTopicRootId;
+		_listSublistPeerId = listSublistPeerId;
 		auto list = object_ptr<ListWidget>(this, infoController());
 
 		const auto weak = _scroll->setOwnedWidget(std::move(list));
@@ -297,24 +315,32 @@ void Panel::refreshList() {
 			_scroll->scrollToY(newScrollTop);
 		}, weak->lifetime());
 
-		// MSVC BUG + REGRESSION rpl::mappers::tuple :(
 		using namespace rpl::mappers;
 		rpl::combine(
 			_scroll->scrollTopValue(),
-			_scroll->heightValue()
-		) | rpl::on_next([=](int top, int height) {
-			const auto bottom = top + height;
+			_scroll->heightValue(),
+			tuple(_1, _1 + _2)
+		) | rpl::on_next([=](int top, int bottom) {
 			weak->setVisibleTopBottom(top, bottom);
 		}, weak->lifetime());
 
+		const auto type = listMusicPeer
+			? Storage::SharedMediaType::MusicFile
+			: section().mediaType();
+		const auto topic = listTopic();
+		const auto sublist = listSublist();
 		auto musicMemento = Info::Saved::MusicMemento(peer);
-		auto mediaMemento = Info::Media::Memento(
-			peer,
-			migratedPeerId(),
-			(listMusicPeer
-				? Storage::SharedMediaType::MusicFile
-				: section().mediaType()));
-		auto &memento = listMusicPeer ? musicMemento.media() : mediaMemento;
+		auto mediaMemento = topic
+			? std::make_unique<Info::Media::Memento>(topic, type)
+			: sublist
+			? std::make_unique<Info::Media::Memento>(sublist, type)
+			: std::make_unique<Info::Media::Memento>(
+				peer,
+				migratedPeerId(),
+				type);
+		auto &memento = listMusicPeer
+			? musicMemento.media()
+			: *mediaMemento;
 		memento.setAroundId(contextId);
 		memento.setIdsLimit(kPlaylistIdsLimit);
 		memento.setScrollTopItem({ contextId, peer->session().uniqueId() });
@@ -328,13 +354,32 @@ void Panel::performDestroy() {
 
 	_scroll->takeWidget<QWidget>().destroy();
 	_listPeer = _listMusicPeer = _listMigratedPeer = nullptr;
+	_listTopicRootId = MsgId();
+	_listSublistPeerId = PeerId();
 	_refreshListLifetime.destroy();
 }
 
+Data::ForumTopic *Panel::listTopic() const {
+	return (_listPeer && _listTopicRootId)
+		? _listPeer->forumTopicFor(_listTopicRootId)
+		: nullptr;
+}
+
+Data::SavedSublist *Panel::listSublist() const {
+	return _listPeer
+		? _listPeer->monoforumSublistFor(_listSublistPeerId)
+		: nullptr;
+}
+
 Info::Key Panel::key() const {
-	return _listMusicPeer
-		? Info::Key(Info::Saved::MusicTag{ _listMusicPeer })
-		: Info::Key(_listPeer);
+	if (_listMusicPeer) {
+		return Info::Key(Info::Saved::MusicTag{ _listMusicPeer });
+	} else if (const auto topic = listTopic()) {
+		return Info::Key(topic);
+	} else if (const auto sublist = listSublist()) {
+		return Info::Key(sublist);
+	}
+	return Info::Key(_listPeer);
 }
 
 PeerData *Panel::migrated() const {

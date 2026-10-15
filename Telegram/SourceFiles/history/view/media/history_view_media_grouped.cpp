@@ -132,7 +132,9 @@ bool GroupedMedia::hideMessageText() const {
 
 GroupedMedia::Mode GroupedMedia::DetectMode(not_null<Data::Media*> media) {
 	const auto document = media->document();
-	return (document && !document->isVideoFile())
+	return (document
+		&& !document->isVideoFile()
+		&& !document->isAnimation())
 		? Mode::Column
 		: Mode::Grid;
 }
@@ -326,18 +328,11 @@ QRect GroupedMedia::groupItemRect(int index) const {
 	return {};
 }
 
-Media *GroupedMedia::partMediaAt(QPoint point) const {
-	point -= QPoint(0, groupedPadding().top());
-	for (const auto &part : _parts) {
-		if (part.geometry.contains(point)) {
-			return part.content.get();
-		}
-	}
-	return nullptr;
-}
-
 Media *GroupedMedia::lookupSpoilerTagMedia() const {
-	if (_parts.empty()) {
+	// Only Photo and Gif parts implement the spoiler tag methods, and they
+	// are the only kinds a Mode::Grid group holds. A Mode::Column group is
+	// built from Document parts, which would hit the base class Unexpected().
+	if (_parts.empty() || _mode == Mode::Column) {
 		return nullptr;
 	}
 	const auto media = _parts.front().content.get();
@@ -432,9 +427,7 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 		&& !IsSubGroupSelection(selection);
 	const auto inWebPage = (_parent->media() != this);
 	constexpr auto kSmall = Ui::BubbleCornerRounding::Small;
-	const auto rounding = IsHostedInstantViewMedia(_parent)
-		? Ui::BubbleRounding()
-		: inWebPage
+	const auto rounding = (inWebPage && !IsHostedInstantViewMedia(_parent))
 		? Ui::BubbleRounding{ kSmall, kSmall, kSmall, kSmall }
 		: adjustedBubbleRounding();
 	auto highlight = context.highlight.range;
@@ -487,7 +480,7 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 		history()->owner().registerHeavyViewPart(_parent);
 	}
 
-	if (tagged) {
+	if (tagged && (_parent->context() != Context::MediaEditor)) {
 		tagged->drawSpoilerTag(p, fullRect, context, [&] {
 			return generateSpoilerTagBackground(fullRect);
 		});
@@ -941,8 +934,7 @@ bool GroupedMedia::computeNeedBubble() const {
 		return true;
 	}
 	if (const auto item = _parent->data()) {
-		if (item->repliesAreComments()
-			|| item->externalReply()
+		if (_parent->hasCommentsButton()
 			|| item->viaBot()
 			|| _parent->displayReply()
 			|| _parent->displayForwardedFrom()

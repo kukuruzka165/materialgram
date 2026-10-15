@@ -15,7 +15,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/photo_editor_controls.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
+#include "ui/layers/layer_manager.h"
 #include "ui/layers/layer_widget.h"
+#include "styles/style_calls.h"
 #include "styles/style_editor.h"
 
 namespace Editor {
@@ -24,6 +26,14 @@ namespace {
 constexpr auto kPrecision = 100000;
 constexpr auto kBrushesVersion = -2;
 constexpr auto kDefaultBrushSizeRatio = 0.9;
+
+[[nodiscard]] std::unique_ptr<Ui::LayerManager> MakeLayers(
+		not_null<Ui::RpWidget*> parent) {
+	auto result = std::make_unique<Ui::LayerManager>(parent);
+	result->setStyleOverrides(&st::groupCallBox, &st::groupCallLayerBox);
+	result->setHideByBackgroundClick(true);
+	return result;
+}
 
 [[nodiscard]] int ToolIndex(Brush::Tool tool) {
 	switch (tool) {
@@ -89,11 +99,45 @@ constexpr auto kDefaultBrushSizeRatio = 0.9;
 struct BrushState {
 	std::array<Brush, 5> brushes = DefaultBrushes();
 	Brush::Tool tool = Brush::Tool::Pen;
+	bool fillShapes = false;
+	TextPrefs textPrefs;
 };
+
+[[nodiscard]] TextStyle TextStyleFromSerialized(qint32 value) {
+	switch (value) {
+	case int(TextStyle::Framed): return TextStyle::Framed;
+	case int(TextStyle::SemiTransparent): return TextStyle::SemiTransparent;
+	case int(TextStyle::Plain): return TextStyle::Plain;
+	case int(TextStyle::Opaque): return TextStyle::Opaque;
+	}
+	return TextStyle::Plain;
+}
+
+[[nodiscard]] TextTypeface TypefaceFromSerialized(qint32 value) {
+	switch (value) {
+	case int(TextTypeface::Default): return TextTypeface::Default;
+	case int(TextTypeface::Italic): return TextTypeface::Italic;
+	case int(TextTypeface::Serif): return TextTypeface::Serif;
+	case int(TextTypeface::Condensed): return TextTypeface::Condensed;
+	case int(TextTypeface::Monospace): return TextTypeface::Monospace;
+	}
+	return TextTypeface::Default;
+}
+
+[[nodiscard]] TextAlignment AlignmentFromSerialized(qint32 value) {
+	switch (value) {
+	case int(TextAlignment::Center): return TextAlignment::Center;
+	case int(TextAlignment::Left): return TextAlignment::Left;
+	case int(TextAlignment::Right): return TextAlignment::Right;
+	}
+	return TextAlignment::Center;
+}
 
 [[nodiscard]] QByteArray Serialize(
 		const std::array<Brush, 5> &brushes,
-		Brush::Tool tool) {
+		Brush::Tool tool,
+		bool fillShapes,
+		const TextPrefs &textPrefs) {
 	auto result = QByteArray();
 	auto stream = QDataStream(&result, QIODevice::WriteOnly);
 	stream.setVersion(QDataStream::Qt_5_3);
@@ -109,6 +153,12 @@ struct BrushState {
 			<< qint32(brush.sizeRatio * kPrecision)
 			<< brush.color;
 	}
+	stream << qint32(fillShapes ? 1 : 0);
+	stream
+		<< qint32(int(textPrefs.style))
+		<< qint32(int(textPrefs.typeface))
+		<< qint32(int(textPrefs.alignment))
+		<< qint32(textPrefs.sizeRatio * kPrecision);
 	stream.device()->close();
 
 	return result;
@@ -157,6 +207,30 @@ struct BrushState {
 				result.brushes[index].color = color;
 			}
 			result.brushes[index].tool = tool;
+		}
+		if (!stream.atEnd()) {
+			auto fillShapes = qint32(0);
+			stream >> fillShapes;
+			if (stream.status() == QDataStream::Ok) {
+				result.fillShapes = (fillShapes == 1);
+			}
+		}
+		if (!stream.atEnd()) {
+			auto style = qint32(0);
+			auto typeface = qint32(0);
+			auto alignment = qint32(0);
+			auto sizeRatio = qint32(0);
+			stream >> style >> typeface >> alignment >> sizeRatio;
+			if (stream.status() == QDataStream::Ok) {
+				result.textPrefs = {
+					.style = TextStyleFromSerialized(style),
+					.typeface = TypefaceFromSerialized(typeface),
+					.alignment = AlignmentFromSerialized(alignment),
+					.sizeRatio = (sizeRatio > 0)
+						? (sizeRatio / float64(kPrecision))
+						: 0.,
+				};
+			}
 		}
 		return result;
 	}
@@ -210,14 +284,18 @@ PhotoEditor::PhotoEditor(
 	EditorData data)
 : RpWidget(parent)
 , _modifications(std::move(modifications))
+, _layers(MakeLayers(this))
 , _controllers(std::make_shared<Controllers>(
 	sessionShow
 		? std::make_unique<StickersPanelController>(
 			this,
-			std::move(sessionShow))
+			sessionShow,
+			data.composeSound)
 		: nullptr,
 	std::make_unique<UndoController>(),
-	show))
+	show,
+	_layers->uiShow(),
+	sessionShow))
 , _content(base::make_unique_q<PhotoEditorContent>(
 	this,
 	photo,
@@ -229,9 +307,13 @@ PhotoEditor::PhotoEditor(
 	_controllers,
 	_modifications,
 	data,
-	photo->size()))
+	photo->size(),
+	Deserialize(Core::App().settings().photoEditorBrush()).fillShapes))
 , _brushes(Deserialize(Core::App().settings().photoEditorBrush()).brushes)
 , _brushTool(Deserialize(Core::App().settings().photoEditorBrush()).tool)
+, _shapesFilled(
+	Deserialize(Core::App().settings().photoEditorBrush()).fillShapes)
+, _textPrefs(Deserialize(Core::App().settings().photoEditorBrush()).textPrefs)
 , _colorPicker(std::make_unique<ColorPicker>(
 	this,
 	std::move(show),
@@ -240,12 +322,86 @@ PhotoEditor::PhotoEditor(
 	_modifications.cropType = data.cropType;
 	_modifications.cropMode = data.cropMode;
 
+	events(
+	) | rpl::on_next([=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::WindowDeactivate) {
+			_content->setExpansionRoom(false);
+		}
+	}, lifetime());
+
 	sizeValue(
 	) | rpl::on_next([=](const QSize &size) {
 		if (size.isEmpty()) {
 			return;
 		}
 		_content->setGeometry(rect() - st::photoEditorContentMargins);
+	}, lifetime());
+
+	_content->videoClipSelections(
+	) | rpl::on_next([=](std::shared_ptr<VideoClip> clip) {
+		_videoClipSelected = (clip != nullptr);
+		updateColorPickerVisibility(anim::type::normal);
+		_controls->setVideoClip(std::move(clip));
+		_controls->setTrimShortestAvailable(
+			_content->canEqualizeDurations());
+		_controls->setTrimShortestActive(
+			_content->durationsLinked(),
+			anim::type::instant);
+	}, lifetime());
+
+	rpl::merge(
+		_content->audioSelectedChanges(),
+		_content->audioChanges() | rpl::map([=] {
+			return _content->audioSelected();
+		})
+	) | rpl::on_next([=](bool selected) {
+		_audioSelected = selected;
+		updateColorPickerVisibility(anim::type::normal);
+		_controls->setAudioTrack(selected ? _content->audio() : nullptr);
+		_controls->setTrimShortestAvailable(
+			_content->canEqualizeDurations());
+		_controls->setTrimShortestActive(
+			_content->durationsLinked(),
+			anim::type::instant);
+	}, lifetime());
+
+	_content->audioVolumeChanges(
+	) | rpl::on_next([=] {
+		_controls->refreshAudioVolume();
+	}, lifetime());
+
+	_content->durationsLinkChanges(
+	) | rpl::on_next([=] {
+		_controls->setTrimShortestAvailable(
+			_content->canEqualizeDurations());
+		_controls->setTrimShortestActive(
+			_content->durationsLinked(),
+			anim::type::instant);
+		_controls->refreshTimelines();
+	}, lifetime());
+
+	_controls->audioRemoveRequests(
+	) | rpl::on_next([=] {
+		_content->removeAudio();
+	}, lifetime());
+
+	_controls->trimShortestRequests(
+	) | rpl::on_next([=] {
+		const auto linked = !_content->durationsLinked();
+		_content->setDurationsLinked(linked);
+		_controls->setTrimShortestActive(linked, anim::type::normal);
+		_controls->refreshTimelines();
+	}, lifetime());
+
+	_controls->trimLengthChanges(
+	) | rpl::on_next([=](crl::time length) {
+		if (!_content->durationsLinked() || _matchingDurations) {
+			return;
+		}
+		_matchingDurations = true;
+		_content->matchDurations(length);
+		_controls->refreshTimelines();
+		_matchingDurations = false;
 	}, lifetime());
 
 	_content->innerRect(
@@ -268,7 +424,8 @@ PhotoEditor::PhotoEditor(
 
 	_controls->colorLineShownValue(
 	) | rpl::on_next([=](bool shown) {
-		_colorPicker->setVisible(shown);
+		_colorLineShown = shown;
+		updateColorPickerVisibility(anim::type::instant);
 	}, _controls->lifetime());
 
 	_mode.value(
@@ -302,7 +459,9 @@ PhotoEditor::PhotoEditor(
 		_content->applyModifications(_modifications);
 	}, lifetime());
 
-	_controls->paintModeRequests(
+	rpl::merge(
+		_controls->paintModeRequests(),
+		_content->paintModeRequests()
 	) | rpl::on_next([=] {
 		_mode = PhotoEditorMode{
 			.mode = PhotoEditorMode::Mode::Paint,
@@ -315,8 +474,46 @@ PhotoEditor::PhotoEditor(
 		_content->createTextItem();
 	}, lifetime());
 
+	_controls->shapeRequests(
+	) | rpl::on_next([=](const ShapeRequest &request) {
+		if (request.action == ShapeRequest::Action::Cancel) {
+			_content->disarmShapeTool();
+			return;
+		}
+		const auto tool = ((_brushTool == Brush::Tool::Eraser)
+			|| (_brushTool == Brush::Tool::Blur))
+			? Brush::Tool::Pen
+			: _brushTool;
+		const auto &brush = _brushes[ToolIndex(tool)];
+		if (request.action == ShapeRequest::Action::Immediate) {
+			_content->createShapeItem(request.shape, brush, _shapesFilled);
+		} else {
+			_content->armShapeTool(request.shape, brush, _shapesFilled);
+		}
+	}, lifetime());
+
+	_content->shapeToolStates(
+	) | rpl::on_next([=](bool active) {
+		_controls->setShapeToolActive(active);
+	}, lifetime());
+
+	_controls->shapesFillChanges(
+	) | rpl::on_next([=](bool fill) {
+		_shapesFilled = fill;
+		const auto serialized = Serialize(
+			_brushes,
+			_brushTool,
+			_shapesFilled,
+			_textPrefs);
+		if (Core::App().settings().photoEditorBrush() != serialized) {
+			Core::App().settings().setPhotoEditorBrush(serialized);
+			Core::App().saveSettingsDelayed();
+		}
+	}, lifetime());
+
 	_controls->doneRequests(
 	) | rpl::on_next([=] {
+		_controls->commitTimelineEdits();
 		const auto mode = _mode.current().mode;
 		if (mode == PhotoEditorMode::Mode::Paint) {
 			_mode = PhotoEditorMode{
@@ -351,6 +548,7 @@ PhotoEditor::PhotoEditor(
 
 	_colorPicker->toolClicks(
 	) | rpl::on_next([=] {
+		_content->disarmShapeTool();
 		_content->clearSelection();
 	}, lifetime());
 
@@ -359,17 +557,41 @@ PhotoEditor::PhotoEditor(
 		if (_textItemSelected || _textEditing) {
 			_content->setSelectedTextColor(brush.color);
 			_content->setTextColor(brush.color);
+		} else if (_shapeItemSelected) {
+			_content->applyBrushToSelectedShape(brush);
 		} else {
 			_content->applyBrush(brush);
 			_content->setTextColor(brush.color);
 
 			_brushTool = brush.tool;
 			_brushes[ToolIndex(brush.tool)] = brush;
-			const auto serialized = Serialize(_brushes, _brushTool);
+			const auto serialized = Serialize(
+				_brushes,
+				_brushTool,
+				_shapesFilled,
+				_textPrefs);
 			if (Core::App().settings().photoEditorBrush() != serialized) {
 				Core::App().settings().setPhotoEditorBrush(serialized);
 				Core::App().saveSettingsDelayed();
 			}
+		}
+	}, lifetime());
+
+	_content->applyTextPrefs(_textPrefs);
+	_content->textPrefsUsed(
+	) | rpl::on_next([=](const TextPrefs &prefs) {
+		if (_textPrefs == prefs) {
+			return;
+		}
+		_textPrefs = prefs;
+		const auto serialized = Serialize(
+			_brushes,
+			_brushTool,
+			_shapesFilled,
+			_textPrefs);
+		if (Core::App().settings().photoEditorBrush() != serialized) {
+			Core::App().settings().setPhotoEditorBrush(serialized);
+			Core::App().saveSettingsDelayed();
 		}
 	}, lifetime());
 
@@ -378,7 +600,7 @@ PhotoEditor::PhotoEditor(
 		_textEditing = editing;
 		if (_textEditing) {
 			_colorPicker->setToolSelectionVisible(false);
-		} else if (!_textItemSelected) {
+		} else if (!_textItemSelected && !_shapeItemSelected) {
 			const auto &brush = _brushes[ToolIndex(_brushTool)];
 			_colorPicker->setColor(brush.color);
 			_colorPicker->setToolSelectionVisible(true);
@@ -400,7 +622,25 @@ PhotoEditor::PhotoEditor(
 	_content->textItemDeselections(
 	) | rpl::on_next([=] {
 		_textItemSelected = false;
-		if (_textEditing) {
+		if (_textEditing || _shapeItemSelected) {
+			return;
+		}
+		const auto &brush = _brushes[ToolIndex(_brushTool)];
+		_colorPicker->setColor(brush.color);
+		_colorPicker->setToolSelectionVisible(true);
+	}, lifetime());
+
+	_content->shapeItemSelections(
+	) | rpl::on_next([=](const QColor &color) {
+		_shapeItemSelected = true;
+		_colorPicker->setToolSelectionVisible(false);
+		_colorPicker->setColor(color);
+	}, lifetime());
+
+	_content->shapeItemDeselections(
+	) | rpl::on_next([=] {
+		_shapeItemSelected = false;
+		if (_textEditing || _textItemSelected) {
 			return;
 		}
 		const auto &brush = _brushes[ToolIndex(_brushTool)];
@@ -410,9 +650,25 @@ PhotoEditor::PhotoEditor(
 }
 
 void PhotoEditor::keyPressEvent(QKeyEvent *e) {
+	_content->setExpansionRoom(e->modifiers().testFlag(Qt::ControlModifier));
 	if (!_colorPicker->preventHandleKeyPress()) {
 		_content->handleKeyPress(e) || _controls->handleKeyPress(e);
 	}
+}
+
+void PhotoEditor::keyReleaseEvent(QKeyEvent *e) {
+	_content->setExpansionRoom(e->modifiers().testFlag(Qt::ControlModifier));
+}
+
+void PhotoEditor::updateColorPickerVisibility(anim::type animated) {
+	const auto painting
+		= (_mode.current().mode == PhotoEditorMode::Mode::Paint);
+	_colorPicker->setVisible(
+		painting
+			&& _colorLineShown
+			&& !_videoClipSelected
+			&& !_audioSelected,
+		animated);
 }
 
 void PhotoEditor::save() {

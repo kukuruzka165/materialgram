@@ -28,6 +28,12 @@ extern const char kOptionProfileMediaTabs[];
 
 class TabsStrip;
 
+struct TabsState {
+	QString activeId;
+	base::flat_map<QString, int> scrollTops;
+	base::flat_map<QString, std::unique_ptr<MediaTabState>> contents;
+};
+
 class TabsHost final : public Ui::RpWidget {
 public:
 	struct Descriptor {
@@ -60,6 +66,9 @@ public:
 	void activateTab(const QString &id, bool animated = true);
 	void restoreActiveTab(const QString &id);
 
+	[[nodiscard]] std::unique_ptr<TabsState> saveState();
+	void restoreState(std::unique_ptr<TabsState> state);
+
 	[[nodiscard]] QRect bodyGeometry() const;
 	[[nodiscard]] Fn<void()> prepareSwitch(bool toNextTab);
 
@@ -89,8 +98,11 @@ private:
 	void pushViewportToActive();
 	void scheduleBodySync();
 	void scheduleHeightSync();
+	void scheduleVisibilitySync();
 	void syncBodyNow();
 	void syncHeightNow();
+	void syncStripVisibility();
+	void syncVisibilityNow();
 	void scrollToBodyTop();
 	[[nodiscard]] QRect bodyVisibleRect() const;
 	void startSlideAnimation(
@@ -102,6 +114,7 @@ private:
 	std::vector<MediaTabDescriptor> _tabs;
 	std::vector<TextWithEntities> _stripTitles;
 	std::vector<bool> _tabsShown;
+	std::vector<bool> _syncedTabsShown;
 	std::vector<int> _order;
 	int _mainTabIndex = -1;
 
@@ -117,6 +130,7 @@ private:
 	QRect _slideRect;
 
 	base::flat_map<QString, std::unique_ptr<MediaTabContent>> _contents;
+	base::flat_map<QString, std::unique_ptr<MediaTabState>> _pendingStates;
 	base::flat_map<QString, int> _tabScrollTops;
 	rpl::event_stream<Ui::ScrollToRequest> _scrollToRequests;
 	QString _activeId;
@@ -124,6 +138,7 @@ private:
 	bool _userChosenTab = false;
 	bool _bodySyncQueued = false;
 	bool _heightSyncQueued = false;
+	bool _visibilitySyncQueued = false;
 	bool _viewportPushPending = false;
 	bool _scrolledToTop = true;
 	bool _searching = false;

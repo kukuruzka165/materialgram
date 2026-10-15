@@ -30,7 +30,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "window/window_session_controller.h"
-#include "styles/style_basic.h"
 #include "styles/style_info.h"
 #include "styles/style_menu_icons.h"
 
@@ -95,9 +94,7 @@ public:
 	MediaTabAdapter(MediaTabContext context, SharedMediaType type)
 	: _context(context)
 	, _type(type)
-	, _countPeer(context.sublist
-		? context.sublist->sublistPeer()
-		: context.peer)
+	, _countPeer(context.peer)
 	, _topicRootId(context.topic ? context.topic->rootId() : MsgId())
 	, _monoforumPeerId(context.sublist
 		? context.sublist->sublistPeer()->id

@@ -19,7 +19,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_session.h"
 #include "styles/style_info.h"
-#include "styles/style_widgets.h"
 
 namespace Info {
 namespace CommonGroups {
@@ -232,10 +231,10 @@ rpl::producer<Ui::ScrollToRequest> InnerWidget::scrollToRequests() const {
 
 int InnerWidget::desiredHeight() const {
 	auto desired = 0;
-	auto count = qMax(_user->commonChatsCount(), 1);
-	desired += qMax(count, _list->fullRowsCount())
+	auto count = std::max(_user->commonChatsCount(), 1);
+	desired += std::max(count, _list->fullRowsCount())
 		* st::infoCommonGroupsList.item.height;
-	return qMax(height(), desired);
+	return std::max(height(), desired);
 }
 
 object_ptr<InnerWidget::ListWidget> InnerWidget::setupList(

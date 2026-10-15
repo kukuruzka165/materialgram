@@ -32,7 +32,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
-#include "styles/style_layers.h"
 
 namespace HistoryView {
 namespace {
@@ -256,8 +255,11 @@ QSize Contact::countOptimalSize() {
 	}
 
 	const auto vcardBoxFactory = _vcardBoxFactory;
+	const auto mediaEditor = (_parent->context() == Context::MediaEditor);
 	_buttons.clear();
-	if (_contact) {
+	if (mediaEditor) {
+		_mainButton.link = nullptr;
+	} else if (_contact) {
 		const auto message = tr::lng_contact_send_message(tr::now).toUpper();
 		_buttons.push_back({
 			message,
@@ -281,7 +283,7 @@ QSize Contact::countOptimalSize() {
 			AddContactClickHandler(_parent->data()),
 		});
 	}
-	if (vcardBoxFactory) {
+	if (vcardBoxFactory && !mediaEditor) {
 		_mainButton.link = std::make_shared<LambdaClickHandler>([=](
 				const ClickContext &context) {
 			const auto my = context.other.value<ClickHandlerContext>();

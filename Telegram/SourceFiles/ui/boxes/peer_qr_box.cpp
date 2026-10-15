@@ -43,7 +43,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 #include "styles/style_widgets.h"
-#include "styles/style_window.h"
 
 #include <QtCore/QMimeData>
 #include <QtGui/QGuiApplication>
@@ -917,6 +916,7 @@ void FillPeerQrBox(
 		const auto top = photoSize
 			? userpicMedia->image(photoSize)
 			: QImage();
+		const auto bgs = state->bgs.current();
 		const auto weak = base::make_weak(box);
 
 		crl::async([=] {
@@ -959,7 +959,7 @@ void FillPeerQrBox(
 					p,
 					font,
 					username,
-					state->bgs.current(),
+					bgs,
 					backgroundMargins,
 					qrImage,
 					qrRect,

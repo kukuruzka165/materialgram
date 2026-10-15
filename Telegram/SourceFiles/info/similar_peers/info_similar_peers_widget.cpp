@@ -26,7 +26,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_premium.h"
 #include "window/window_session_controller.h"
 #include "styles/style_info.h"
-#include "styles/style_widgets.h"
 
 namespace Info::SimilarPeers {
 namespace {
@@ -359,7 +358,7 @@ rpl::producer<Ui::ScrollToRequest> InnerWidget::scrollToRequests() const {
 int InnerWidget::desiredHeight() const {
 	auto desired = 0;
 	desired += _list->fullRowsCount() * st::infoMembersList.item.height;
-	return qMax(height(), desired);
+	return std::max(height(), desired);
 }
 
 object_ptr<InnerWidget::ListWidget> InnerWidget::setupList(

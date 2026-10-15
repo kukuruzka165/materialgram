@@ -9,6 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/text/text_entity.h"
 
+namespace style {
+struct EmojiPan;
+} // namespace style
+
 namespace SendMenu {
 
 enum class Type : uchar {
@@ -38,6 +42,12 @@ enum class PhotoQualityState : uchar {
 	High,
 };
 
+enum class CoverState : uchar {
+	None,
+	Add,
+	Has,
+};
+
 struct Details {
 	Type type = Type::Disabled;
 	uint64 barePeerId = 0;
@@ -45,10 +55,12 @@ struct Details {
 	SpoilerState spoiler = SpoilerState::None;
 	CaptionState caption = CaptionState::None;
 	PhotoQualityState photoQuality = PhotoQualityState::None;
+	CoverState cover = CoverState::None;
 	TextWithTags commentPreview;
 	QString commentStreamerName;
 	std::optional<uint64> price;
 	std::optional<uint64> commentPriceMin;
+	const style::EmojiPan *effectsPan = nullptr;
 	bool effectAllowed = false;
 	bool aiComposeAllowed = false;
 };

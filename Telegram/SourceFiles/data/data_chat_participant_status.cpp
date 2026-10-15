@@ -25,7 +25,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "window/window_session_controller.h"
-#include "styles/style_widgets.h"
 
 namespace {
 
@@ -56,6 +55,9 @@ namespace {
 				: Flag())
 			| (data.is_manage_linked_peers()
 				? Flag::ManageLinkedPeers
+				: Flag())
+			| (data.is_manage_welcome_messages()
+				? Flag::ManageWelcomeMessages
 				: Flag());
 	});
 }
@@ -131,6 +133,9 @@ MTPChatAdminRights AdminRightsToMTP(ChatAdminRightsInfo info) {
 			: Flag())
 		| ((flags & R::ManageLinkedPeers)
 			? Flag::f_manage_linked_peers
+			: Flag())
+		| ((flags & R::ManageWelcomeMessages)
+			? Flag::f_manage_welcome_messages
 			: Flag())));
 }
 
@@ -499,7 +504,9 @@ SendError FileRestrictionError(
 	}
 	switch (file.type) {
 	case Type::Photo:
-		if (compress == true && photos) {
+		if (compress == true && videos && file.hasAudioEditScene()) {
+			return videos;
+		} else if (compress == true && photos) {
 			return photos;
 		} else if (const auto other = file.isSticker() ? stickers : files) {
 			if ((compress == false || photos) && other) {

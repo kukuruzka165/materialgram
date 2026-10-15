@@ -1,0 +1,39 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+using "settings/settings.style";
+
+settingsIconChat: icon {{ "settings/chat", windowFgActive }};
+settingsIconStickers: icon {{ "settings/stickers", windowFgActive }};
+settingsIconEmoji: icon {{ "settings/emoji", windowFgActive }};
+settingsPremiumIconWallpapers: icon {{ "settings/photo", windowFgActive }};
+settingsPremiumIconStories: icon {{ "settings/stories", windowFgActive }};
+settingsPremiumIconChannelsOff: icon {{ "settings/premium/channels_off", windowFgActive }};
+settingsPremiumIconStatus: icon {{ "settings/premium/status", windowFgActive }};
+settingsPremiumIconLike: icon {{ "settings/premium/like", windowFgActive }};
+settingsPremiumIconPlay: icon {{ "settings/premium/play", windowFgActive }};
+settingsPremiumIconSpeed: icon {{ "settings/premium/speed", windowFgActive }};
+settingsPremiumIconStar: icon {{ "settings/premium/star", windowFgActive }};
+settingsPremiumIconVoice: icon {{ "settings/premium/voice", windowFgActive }};
+settingsPremiumIconFiles: icon {{ "settings/premium/files", windowFgActive }};
+settingsPremiumIconTranslations: icon {{ "settings/premium/translations", windowFgActive }};
+settingsPremiumIconLastSeen: icon {{ "settings/premium/lastseen", windowFgActive }};
+settingsPremiumIconPrivacy: icon {{ "settings/premium/privacy", windowFgActive }};
+settingsPremiumIconBusiness: icon {{ "settings/premium/market", windowFgActive }};
+settingsPremiumIconEffects: icon {{ "settings/premium/effects", windowFgActive }};
+settingsPremiumIconChecklist: icon {{ "settings/premium/checklist", windowFgActive }};
+settingsPremiumIconPeerColors: icon {{ "settings/premium/peer_colors-24x24", windowFgActive }};
+settingsPremiumIconNoForwards: icon {{ "menu/share_off-24x24", windowFgActive }};
+settingsPremiumIconAiCompose: icon{
+	{ size(24px, 24px), transparent },
+	{ "chat/ai_letters-20x20", windowFgActive, point(2px, 2px) },
+	{ "chat/ai_star1-20x20", windowFgActive, point(2px, 2px) },
+	{ "chat/ai_star2-20x20", windowFgActive, point(2px, 2px) },
+};
+settingsPremiumIconRich: icon {{ "settings/premium/rich", settingsIconFg }};
+settingsPremiumUserHeight: 205px;
+settingsPremiumUserTitlePadding: margins(0px, 16px, 0px, 6px);

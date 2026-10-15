@@ -29,7 +29,9 @@ public:
 	~ItemCanvas();
 
 	void applyBrush(const QColor &color, float size, Brush::Tool tool);
-	void clearPixmap();
+	void setCanvasRect(const QRectF &rect);
+	[[nodiscard]] QRectF canvasRect() const;
+	[[nodiscard]] QRectF drawableRect() const;
 	void cancelDrawing();
 	void updateZoom(float64 zoom);
 
@@ -60,6 +62,8 @@ private:
 		int64 time = 0;
 	};
 
+	void preparePixmap();
+	void releasePixmap();
 	void computeContentRect(const QPointF &p);
 	void addStrokePoint(const QPointF &point, int64 time);
 	void drawIncrementalStroke();
@@ -74,6 +78,7 @@ private:
 	[[nodiscard]] float64 arrowHeadLength() const;
 
 	bool _drawing = false;
+	bool _dragging = false;
 	std::vector<StrokePoint> _currentStroke;
 	int _lastRenderedIndex = 0;
 	float64 _zoom = 1.0;
@@ -84,6 +89,7 @@ private:
 
 	QRectF _rectToUpdate;
 	QRectF _contentRect;
+	QRectF _canvasRect;
 	QMarginsF _brushMargins;
 
 	QPointF _lastPoint;

@@ -44,7 +44,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_polls.h"
 #include "styles/style_widgets.h"
-#include "styles/style_window.h"
 
 namespace HistoryView {
 
@@ -172,7 +171,8 @@ QSize TodoList::countOptimalSize() {
 }
 
 bool TodoList::canComplete() const {
-	return (_parent->data()->out()
+	return (_parent->context() != Context::MediaEditor)
+		&& (_parent->data()->out()
 		|| _parent->history()->peer->isSelf()
 		|| _todolist->othersCanComplete())
 		&& _parent->data()->isRegular()

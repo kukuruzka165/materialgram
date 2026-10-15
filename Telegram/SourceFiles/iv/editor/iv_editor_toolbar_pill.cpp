@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 
 #include "styles/palette.h"
-#include "styles/style_dialogs.h"
 #include "styles/style_iv.h"
 
 namespace Iv::Editor {
@@ -105,13 +104,7 @@ void ToolbarPill::paintEvent(QPaintEvent *e) {
 	const auto pill = rect() - _shadowMargins;
 	const auto radius = pill.height() / 2;
 
-	_shadow.paint(p, pill, radius);
-
-	p.setBrush(st::dialogsBg);
-	p.setPen(Qt::NoPen);
-	p.drawRoundedRect(pill, radius, radius);
-
-	Dialogs::PaintPillOutline(p, pill, radius);
+	Dialogs::PaintPillBackground(p, _shadow, pill, radius);
 }
 
 } // namespace Iv::Editor

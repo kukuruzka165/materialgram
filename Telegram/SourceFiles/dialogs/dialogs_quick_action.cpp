@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "dialogs/ui/dialogs_quick_action_context.h"
 #include "apiwrap.h"
+#include "data/data_channel.h"
+#include "data/data_community.h"
 #include "data/data_histories.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
@@ -18,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "main/main_session.h"
+#include "menu/menu_mark_as_read.h"
 #include "menu/menu_mute.h"
 #include "ui/toast/toast.h"
 #include "window/window_peer_menu.h"
@@ -64,6 +67,30 @@ const style::font &SwipeActionFont(
 	Unexpected("SwipeActionFont: can't find font.");
 }
 
+[[nodiscard]] Data::CommunityInfo *QuickActionCommunity(
+		not_null<History*> history) {
+	const auto channel = history->peer->asChannel();
+	return (channel && channel->isCommunity())
+		? channel->communityInfo()
+		: nullptr;
+}
+
+[[nodiscard]] ChannelData *QuickActionUngroupCommunity(
+		not_null<History*> history,
+		Ui::QuickDialogAction action) {
+	const auto info = QuickActionCommunity(history);
+	if (!info || action == Dialogs::Ui::QuickDialogAction::Disabled) {
+		return nullptr;
+	} else if (action == Dialogs::Ui::QuickDialogAction::Mute
+		|| action == Dialogs::Ui::QuickDialogAction::Pin) {
+		return nullptr;
+	} else if (action == Dialogs::Ui::QuickDialogAction::Read
+		&& MarkAsReadMenu::IsUnreadThread(history)) {
+		return nullptr;
+	}
+	return info->channel();
+}
+
 } // namespace
 
 void PerformQuickDialogAction(
@@ -72,7 +99,9 @@ void PerformQuickDialogAction(
 		Ui::QuickDialogAction action,
 		FilterId filterId) {
 	const auto history = peer->owner().history(peer);
-	if (action == Dialogs::Ui::QuickDialogAction::Mute) {
+	if (const auto community = QuickActionUngroupCommunity(history, action)) {
+		Window::PeerMenuUngroupCommunity(controller, community);
+	} else if (action == Dialogs::Ui::QuickDialogAction::Mute) {
 		const auto muted = MuteMenu::ToggleMuteForever(history);
 		controller->showToast({
 			.text = { muted
@@ -106,8 +135,12 @@ void PerformQuickDialogAction(
 			});
 		}
 	} else if (action == Dialogs::Ui::QuickDialogAction::Read) {
-		if (Window::IsUnreadThread(history)) {
-			Window::MarkAsReadThread(history);
+		if (MarkAsReadMenu::IsUnreadThread(history)) {
+			if (const auto info = QuickActionCommunity(history)) {
+				MarkAsReadMenu::MarkAsReadChatList(info->chatsList());
+			} else {
+				MarkAsReadMenu::MarkAsReadThread(history);
+			}
 			controller->showToast(
 				tr::lng_quick_dialog_action_toast_read_success(tr::now));
 		} else if (history) {
@@ -149,6 +182,8 @@ QString ResolveQuickDialogLottieIconName(Ui::QuickDialogActionLabel action) {
 		return u"swipe_unarchive"_q;
 	case Ui::QuickDialogActionLabel::Delete:
 		return u"swipe_delete"_q;
+	case Ui::QuickDialogActionLabel::Ungroup:
+		return u"swipe_ungroup"_q;
 	default:
 		return u"swipe_disabled"_q;
 	}
@@ -158,7 +193,9 @@ Ui::QuickDialogActionLabel ResolveQuickDialogLabel(
 		not_null<History*> history,
 		Ui::QuickDialogAction action,
 		FilterId filterId) {
-	if (action == Dialogs::Ui::QuickDialogAction::Mute) {
+	if (QuickActionUngroupCommunity(history, action)) {
+		return Ui::QuickDialogActionLabel::Ungroup;
+	} else if (action == Dialogs::Ui::QuickDialogAction::Mute) {
 		if (history->peer->isSelf()) {
 			return Ui::QuickDialogActionLabel::Disabled;
 		}
@@ -173,7 +210,7 @@ Ui::QuickDialogActionLabel ResolveQuickDialogLabel(
 			? Ui::QuickDialogActionLabel::Unpin
 			: Ui::QuickDialogActionLabel::Pin;
 	} else if (action == Dialogs::Ui::QuickDialogAction::Read) {
-		const auto unread = Window::IsUnreadThread(history);
+		const auto unread = MarkAsReadMenu::IsUnreadThread(history);
 		if (history->isForum() && !unread) {
 			return Ui::QuickDialogActionLabel::Disabled;
 		}
@@ -213,6 +250,8 @@ QString ResolveQuickDialogLabel(Ui::QuickDialogActionLabel action) {
 		return tr::lng_settings_quick_dialog_action_unarchive(tr::now);
 	case Ui::QuickDialogActionLabel::Delete:
 		return tr::lng_settings_quick_dialog_action_delete(tr::now);
+	case Ui::QuickDialogActionLabel::Ungroup:
+		return tr::lng_community_ungroup(tr::now);
 	default:
 		return tr::lng_settings_quick_dialog_action_disabled(tr::now);
 	};
@@ -222,6 +261,7 @@ const style::color &ResolveQuickActionBg(
 		Ui::QuickDialogActionLabel action) {
 	switch (action) {
 	case Ui::QuickDialogActionLabel::Delete:
+	case Ui::QuickDialogActionLabel::Ungroup:
 		return st::attentionButtonFg;
 	case Ui::QuickDialogActionLabel::Disabled:
 		return st::windowSubTextFgOver;

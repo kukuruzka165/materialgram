@@ -12,8 +12,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/animations.h"
 #include "base/timer.h"
 #include "base/object_ptr.h"
+#include "base/weak_qptr.h"
 #include "data/data_report.h"
 #include "dialogs/dialogs_key.h"
+
+namespace style {
+struct UserpicButton;
+} // namespace style
 
 namespace Main {
 class Session;
@@ -141,7 +146,10 @@ private:
 
 	[[nodiscard]] bool rootChatsListBar() const;
 	[[nodiscard]] bool communityChatsListBar() const;
+	[[nodiscard]] bool communityUserpicShown() const;
+	[[nodiscard]] const style::UserpicButton &infoButtonStyle() const;
 	void refreshInfoButton();
+	void updateInfoButtonVisibility();
 	void refreshLang();
 	void updateSearchVisibility();
 	void updateSearchJumpToDateVisibility();
@@ -161,6 +169,8 @@ private:
 	[[nodiscard]] bool createMenu(
 		not_null<Ui::IconButton*> button,
 		bool withIcons = true);
+	void closeMenu();
+	void unrippleMenuButton();
 
 	void handleEmojiInteractionSeen(const QString &emoticon);
 	bool paintSendAction(
@@ -248,6 +258,7 @@ private:
 	object_ptr<Ui::IconButton> _infoToggle;
 	object_ptr<Ui::IconButton> _menuToggle;
 	base::unique_qptr<Ui::PopupMenu> _menu;
+	base::weak_qptr<Ui::IconButton> _menuButton;
 
 	object_ptr<RpWidget> _membersShowArea = { nullptr };
 	rpl::event_stream<bool> _membersShowAreaActive;

@@ -21,7 +21,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webview/webview_embed.h"
 #include "webview/webview_interface.h"
 
-#include "styles/style_layers.h"
 #include "styles/style_iv.h"
 
 #include <QtCore/QEvent>
@@ -570,7 +569,7 @@ void EmbedOverlay::ensureWebview() {
 		return handleDataRequest(std::move(request));
 	});
 	raw->init(EmbedInitScript());
-	raw->setNavigationStartHandler([=](const QString &uri, bool newWindow) {
+	raw->setNavigationPolicyHandler([=](const QString &uri, bool newWindow) {
 		if (uri == u"about:blank"_q) {
 			return true;
 		}

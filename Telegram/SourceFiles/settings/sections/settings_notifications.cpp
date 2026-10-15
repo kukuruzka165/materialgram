@@ -50,12 +50,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/section_widget.h"
 #include "window/themes/window_theme.h"
 #include "window/window_session_controller.h"
-#include "styles/style_boxes.h"
+#include "styles/style_background_preview_box.h"
 #include "styles/style_chat.h"
 #include "styles/style_dialogs.h"
+#include "styles/style_edit_peer_members.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
+#include "styles/style_settings_notifications.h"
 #include "styles/style_window.h"
 
 #include <QtGui/QGuiApplication>
@@ -561,7 +563,7 @@ void NotificationsCount::setOverCorner(ScreenCorner corner) {
 	auto &samples = _cornerSamples[static_cast<int>(_overCorner)];
 	auto samplesAlready = int(samples.size());
 	auto samplesNeeded = _oldCount;
-	auto samplesLeave = qMin(samplesAlready, samplesNeeded);
+	auto samplesLeave = std::min(samplesAlready, samplesNeeded);
 	for (int i = 0; i != samplesLeave; ++i) {
 		samples[i]->showFast();
 	}

@@ -24,7 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "ui/power_saving.h"
 #include "ui/ui_utility.h"
-#include "styles/style_chat.h"
 
 namespace HistoryView {
 namespace {
@@ -363,12 +362,6 @@ void EmojiInteractions::play(
 
 void EmojiInteractions::refreshLayerShift() {
 	_layerShift = Ui::MapFrom(_layerParent, _parent, QPoint(0, 0));
-}
-
-void EmojiInteractions::refreshLayerGeometryAndUpdate(QRect rect) {
-	if (!rect.isEmpty()) {
-		_layer->update(rect.translated(_layerShift));
-	}
 }
 
 void EmojiInteractions::visibleAreaUpdated(

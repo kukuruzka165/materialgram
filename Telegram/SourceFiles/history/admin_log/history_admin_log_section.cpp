@@ -32,7 +32,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_window.h"
 #include "styles/style_info.h"
 
 namespace AdminLog {
@@ -399,7 +398,8 @@ void Widget::scrollDownClicked() {
 
 void Widget::scrollToAnimationCallback() {
 	const auto scrollTo = _scroll->scrollTopMax();
-	_scroll->scrollToY(qRound(_scrollToAnimation.value(scrollTo)));
+	const auto value = _scrollToAnimation.value(scrollTo);
+	_scroll->scrollToY(int(base::SafeRound(value)));
 }
 
 void Widget::updateScrollDownVisibility() {
@@ -564,6 +564,11 @@ std::shared_ptr<Window::SectionMemento> Widget::createMemento() {
 	return result;
 }
 
+auto Widget::createIdentityMemento()
+-> std::shared_ptr<Window::SectionMemento> {
+	return std::make_shared<SectionMemento>(channel());
+}
+
 void Widget::saveState(not_null<SectionMemento*> memento) {
 	memento->setScrollTop(_scroll->scrollTop());
 	_inner->saveState(memento);
@@ -583,7 +588,8 @@ void Widget::resizeEvent(QResizeEvent *e) {
 
 	const auto contentWidth = width();
 
-	const auto newScrollTop = _scroll->scrollTop() + topDelta();
+	const auto delta = takeTopDelta();
+	const auto newScrollTop = _scroll->scrollTop() + delta;
 	_fixedBar->resizeToWidth(contentWidth);
 	_fixedBarShadow->resize(contentWidth, st::lineWidth);
 
@@ -599,7 +605,7 @@ void Widget::resizeEvent(QResizeEvent *e) {
 	}
 
 	if (!_scroll->isHidden()) {
-		if (topDelta()) {
+		if (delta) {
 			_scroll->scrollToY(newScrollTop);
 		}
 		auto scrollTop = _scroll->scrollTop();

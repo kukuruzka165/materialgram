@@ -9,10 +9,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_text_entities.h"
 #include "base/qt/qt_key_modifiers.h"
+#include "base/algorithm.h"
 #include "base/options.h"
 #include "lang/lang_keys.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/effects/spoiler_mess.h"
+#include "ui/effects/voice_once_particles.h"
 #include "ui/image/image.h"
 #include "ui/toast/toast.h"
 #include "ui/text/format_values.h"
@@ -30,10 +32,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_message.h" // FromNameFg.
 #include "history/view/history_view_service_message.h"
 #include "history/view/media/history_view_document.h"
+#include "history/view/history_view_transcribe_button.h"
 #include "core/click_handler_types.h"
 #include "core/local_url_handlers.h"
 #include "core/ui_integration.h"
 #include "media/audio/media_audio.h"
+#include "media/player/media_player_float.h"
 #include "media/player/media_player_instance.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/components/scheduled_messages.h"
@@ -53,11 +57,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "api/api_bot.h"
 #include "support/support_helper.h"
-#include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_credits.h"
 #include "styles/style_dialogs.h" // dialogsMiniReplyStory.
-#include "styles/style_settings.h"
 #include "styles/style_widgets.h"
 
 #include <QtGui/QGuiApplication>
@@ -65,6 +67,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 const auto kPsaForwardedPrefix = "cloud_lng_forwarded_psa_";
+
+[[nodiscard]] bool IsForwardedFromChannel(const PeerData *sender) {
+	return sender && sender->isChannel() && !sender->isMegagroup();
+}
 
 base::options::toggle FastButtonsModeOption({
 	.id = kOptionFastButtonsMode,
@@ -215,6 +221,9 @@ HiddenSenderInfo::HiddenSenderInfo(
 	Expects(!name.isEmpty());
 
 	const auto parts = name.trimmed().split(' ', Qt::SkipEmptyParts);
+	if (parts.isEmpty()) {
+		return;
+	}
 	firstName = parts[0];
 	for (const auto &part : parts.mid(1)) {
 		if (!lastName.isEmpty()) {
@@ -277,37 +286,18 @@ bool HiddenSenderInfo::paintCustomUserpic(
 	return valid;
 }
 
-void HistoryMessageForwarded::create(
+TextWithEntities HistoryMessageForwarded::phrase(
 		const HistoryMessageVia *via,
-		not_null<const HistoryItem*> item) const {
-	auto phrase = TextWithEntities();
-	auto context = Core::TextContext({
-		.session = &item->history()->session(),
-	});
-	const auto fromChannel = originalSender
-		&& originalSender->isChannel()
-		&& !originalSender->isMegagroup();
+		TextWithEntities userpic) const {
+	const auto fromChannel = IsForwardedFromChannel(originalSender);
 	const auto name = TextWithEntities{
 		.text = (originalSender
 			? originalSender->name()
 			: originalHiddenSenderInfo->name)
 	};
-	if (const auto copy = originalSender) {
-		context.repaint = [=] {
-			// It is important to capture here originalSender by value,
-			// not capture the HistoryMessageForwarded* and read the
-			// originalSender field, because the components themselves
-			// get moved from place to place and the captured `this`
-			// pointer may become invalid, resulting in a crash.
-			copy->owner().requestItemRepaint(item);
-		};
-		phrase = Ui::Text::SingleCustomEmoji(
-			copy->owner().customEmojiManager().peerUserpicEmojiData(
-				copy,
-				st::fwdTextUserpicPadding));
-	}
+	auto result = std::move(userpic);
 	if (!originalPostAuthor.isEmpty()) {
-		phrase.append(
+		result.append(
 			tr::lng_forwarded_signed(
 				tr::now,
 				lt_channel,
@@ -316,31 +306,31 @@ void HistoryMessageForwarded::create(
 				{ .text = originalPostAuthor },
 				tr::marked));
 	} else {
-		phrase.append(name);
+		result.append(name);
 	}
 	if (story) {
-		phrase = tr::lng_forwarded_story(
+		result = tr::lng_forwarded_story(
 			tr::now,
 			lt_user,
-			Ui::Text::Wrapped(phrase, EntityType::CustomUrl, QString()), // Link 1.
+			Ui::Text::Wrapped(result, EntityType::CustomUrl, QString()), // Link 1.
 			tr::marked);
 	} else if (via && psaType.isEmpty()) {
 		const auto linkData = tr::link(
 			QString(),
 			1).entities.front().data(); // Link 1.
 		if (fromChannel) {
-			phrase = tr::lng_forwarded_channel_via(
+			result = tr::lng_forwarded_channel_via(
 				tr::now,
 				lt_channel,
-				Ui::Text::Wrapped(phrase, EntityType::CustomUrl, linkData), // Link 1.
+				Ui::Text::Wrapped(result, EntityType::CustomUrl, linkData), // Link 1.
 				lt_inline_bot,
 				tr::link('@' + via->bot->username(), 2), // Link 2.
 				tr::marked);
 		} else {
-			phrase = tr::lng_forwarded_via(
+			result = tr::lng_forwarded_via(
 				tr::now,
 				lt_user,
-				Ui::Text::Wrapped(phrase, EntityType::CustomUrl, linkData), // Link 1.
+				Ui::Text::Wrapped(result, EntityType::CustomUrl, linkData), // Link 1.
 				lt_inline_bot,
 				tr::link('@' + via->bot->username(), 2), // Link 2.
 				tr::marked);
@@ -352,40 +342,70 @@ void HistoryMessageForwarded::create(
 				: Lang::GetNonDefaultValue(
 					kPsaForwardedPrefix + psaType.toUtf8());
 			if (!custom.isEmpty()) {
-				custom = custom.replace("{channel}", phrase.text);
-				const auto index = int(custom.indexOf(phrase.text));
-				const auto size = int(phrase.text.size());
-				phrase = TextWithEntities{
+				custom = custom.replace("{channel}", result.text);
+				const auto index = int(custom.indexOf(result.text));
+				const auto size = int(result.text.size());
+				result = TextWithEntities{
 					.text = custom,
 					.entities = {{ EntityType::CustomUrl, index, size, {} }},
 				};
 			} else {
-				phrase = (psaType.isEmpty()
+				result = (psaType.isEmpty()
 					? tr::lng_forwarded_channel
 					: tr::lng_forwarded_psa_default)(
 						tr::now,
 						lt_channel,
 						Ui::Text::Wrapped(
-							phrase,
+							result,
 							EntityType::CustomUrl,
 							QString()), // Link 1.
 						tr::marked);
 			}
 		} else {
-			phrase = tr::lng_forwarded(
+			result = tr::lng_forwarded(
 				tr::now,
 				lt_user,
-				Ui::Text::Wrapped(phrase, EntityType::CustomUrl, QString()), // Link 1.
+				Ui::Text::Wrapped(result, EntityType::CustomUrl, QString()), // Link 1.
 				tr::marked);
 		}
 	}
-	text.setMarkedText(st::fwdTextStyle, phrase, kMarkupTextOptions, context);
+	return result;
+}
 
-	text.setLink(1, fromChannel
-		? JumpToMessageClickHandler(originalSender, originalId)
-		: originalSender
-		? originalSender->openLink()
-		: HiddenSenderInfo::ForwardClickHandler());
+void HistoryMessageForwarded::create(
+		const HistoryMessageVia *via,
+		not_null<const HistoryItem*> item) const {
+	auto context = Core::TextContext({
+		.session = &item->history()->session(),
+	});
+	auto userpic = tr::marked();
+	if (const auto copy = originalSender) {
+		context.repaint = [=] {
+			// It is important to capture here originalSender by value,
+			// not capture the HistoryMessageForwarded* and read the
+			// originalSender field, because the components themselves
+			// get moved from place to place and the captured `this`
+			// pointer may become invalid, resulting in a crash.
+			copy->owner().requestItemRepaint(item);
+		};
+		userpic = Ui::Text::SingleCustomEmoji(
+			copy->owner().customEmojiManager().peerUserpicEmojiData(
+				copy,
+				st::fwdTextUserpicPadding));
+	}
+	text.setMarkedText(
+		st::fwdTextStyle,
+		phrase(via, std::move(userpic)),
+		kMarkupTextOptions,
+		context);
+
+	text.setLink(
+		1,
+		IsForwardedFromChannel(originalSender)
+			? JumpToMessageClickHandler(originalSender, originalId)
+			: originalSender
+			? originalSender->openLink()
+			: HiddenSenderInfo::ForwardClickHandler());
 	if (via) {
 		text.setLink(2, via->link);
 	}
@@ -932,7 +952,7 @@ void ReplyKeyboard::resize(int width, int height) {
 		auto widthOfText = 0;
 		auto maxMinButtonWidth = 0;
 		for (const auto &button : row) {
-			widthOfText += qMax(button.text.maxWidth(), 1);
+			widthOfText += std::max(button.text.maxWidth(), 1);
 			int minButtonWidth = _st->minButtonWidth(button.iconType);
 			widthForText -= minButtonWidth;
 			accumulate_max(maxMinButtonWidth, minButtonWidth);
@@ -943,7 +963,7 @@ void ReplyKeyboard::resize(int width, int height) {
 
 		auto x = 0.;
 		for (auto &button : row) {
-			int buttonw = qMax(button.text.maxWidth(), 1);
+			int buttonw = std::max(button.text.maxWidth(), 1);
 			float64 textw = buttonw, minw = _st->minButtonWidth(button.iconType);
 			float64 w = textw;
 			if (exact) {
@@ -961,9 +981,9 @@ void ReplyKeyboard::resize(int width, int height) {
 			const auto rectw = static_cast<int>(std::floor(x + w)) - rectx;
 			button.rect = QRect(
 				rectx,
-				qRound(y),
+				int(base::SafeRound(y)),
 				rectw,
-				qRound(buttonHeight - _st->buttonSkip()));
+				int(base::SafeRound(buttonHeight - _st->buttonSkip())));
 			if (rtl()) {
 				button.rect.setX(
 					_width - button.rect.x() - button.rect.width());
@@ -983,7 +1003,7 @@ bool ReplyKeyboard::isEnoughSpace(
 		auto s = int(row.size());
 		auto widthLeft = width - ((s - 1) * st.margin + s * 2 * st.padding);
 		for (const auto &button : row) {
-			widthLeft -= qMax(button.text.maxWidth(), 1);
+			widthLeft -= std::max(button.text.maxWidth(), 1);
 			if (widthLeft < 0) {
 				if (row.size() > 3) {
 					return false;
@@ -1013,7 +1033,7 @@ int ReplyKeyboard::naturalWidth() const {
 		for (const auto &button : row) {
 			accumulate_max(
 				rowMaxButtonWidth,
-				qMax(button.text.maxWidth(), 1) + maxMinButtonWidth);
+				std::max(button.text.maxWidth(), 1) + maxMinButtonWidth);
 		}
 
 		const auto rowSize = int(row.size());
@@ -1165,7 +1185,7 @@ void ReplyKeyboard::clickHandlerActiveChanged(
 ReplyKeyboard::ButtonCoords ReplyKeyboard::findButtonCoordsByClickHandler(
 		const ClickHandlerPtr &p) {
 	for (int i = 0, rows = _rows.size(); i != rows; ++i) {
-		auto &row = _rows[i];
+		const auto &row = _rows[i];
 		for (int j = 0, cols = row.size(); j != cols; ++j) {
 			if (row[j].link == p) {
 				return { i, j };
@@ -1260,9 +1280,7 @@ void ReplyKeyboard::Style::paintButton(
 		}
 	}
 	paintButtonIcon(p, st, rect, outerWidth, button.iconType);
-	if (button.type == HistoryMessageMarkupButton::Type::CallbackWithPassword
-		|| button.type == HistoryMessageMarkupButton::Type::Callback
-		|| button.type == HistoryMessageMarkupButton::Type::Game) {
+	if (HistoryMessageMarkupButton::LoadsOnActivate(button.type)) {
 		if (const auto data = button.link->getButton()) {
 			if (data->requestId) {
 				paintButtonLoading(
@@ -1528,6 +1546,12 @@ TextWithEntities ComposeTodoTasksList(
 	return ComposeTodoTasksList(names.size(), names);
 }
 
+QString HistoryServiceGramTransfer::commentText() const {
+	return commentEncrypted
+		? tr::lng_action_gram_transfer_encrypted_comment(tr::now)
+		: TextUtilities::SingleLine(comment);
+}
+
 HistoryDocumentCaptioned::HistoryDocumentCaptioned()
 : caption(st::msgFileMinWidth - rect::m::sum::h(st::msgPadding)) {
 }
@@ -1542,6 +1566,33 @@ HistoryDocumentVoicePlayback::HistoryDocumentVoicePlayback(
 }
 
 HistoryDocumentVoicePlayback::~HistoryDocumentVoicePlayback() = default;
+
+HistoryDocumentVoice &HistoryDocumentVoice::operator=(
+		HistoryDocumentVoice &&other) {
+	if (this == &other) {
+		return *this;
+	}
+	if (_seeking) {
+		stopSeeking();
+	}
+	playback = std::move(other.playback);
+	seekl = std::move(other.seekl);
+	lastDurationMs = base::take(other.lastDurationMs);
+	transcribe = std::move(other.transcribe);
+	transcribeText = std::move(other.transcribeText);
+	round = std::move(other.round);
+	once = std::move(other.once);
+	_seeking = base::take(other._seeking);
+	_seekingStart = base::take(other._seekingStart);
+	_seekingCurrent = base::take(other._seekingCurrent);
+	return *this;
+}
+
+HistoryDocumentVoice::~HistoryDocumentVoice() {
+	if (_seeking) {
+		stopSeeking();
+	}
+}
 
 void HistoryDocumentVoice::ensurePlayback(
 		const HistoryView::Document *that) const {
@@ -1576,7 +1627,8 @@ float64 HistoryDocumentVoice::seekingStart() const {
 }
 
 void HistoryDocumentVoice::setSeekingStart(float64 seekingStart) const {
-	_seekingStart = qRound(seekingStart * kFloatToIntMultiplier);
+	const auto value = seekingStart * kFloatToIntMultiplier;
+	_seekingStart = int(base::SafeRound(value));
 }
 
 float64 HistoryDocumentVoice::seekingCurrent() const {
@@ -1584,5 +1636,6 @@ float64 HistoryDocumentVoice::seekingCurrent() const {
 }
 
 void HistoryDocumentVoice::setSeekingCurrent(float64 seekingCurrent) {
-	_seekingCurrent = qRound(seekingCurrent * kFloatToIntMultiplier);
+	const auto value = seekingCurrent * kFloatToIntMultiplier;
+	_seekingCurrent = int(base::SafeRound(value));
 }

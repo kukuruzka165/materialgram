@@ -68,10 +68,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
+#include "styles/style_premium.h"
 #include "styles/style_settings.h"
 #include "styles/style_statistics.h"
-#include "styles/style_credits.h"
-#include "styles/style_window.h" // mainMenuToggleFourStrokes.
 
 #include <QtWidgets/QApplication>
 
@@ -442,7 +441,7 @@ void InnerWidget::fill() {
 				auto emojiHelper = Ui::Text::CustomEmojiHelper();
 				const auto bigCurrencyIcon = emojiHelper.paletteDependent({
 					.factory = [=] {
-						return Ui::Earn::IconCurrencyColored(
+						return Ui::Earn::IconCurrencyTwoTone(
 							st::boxTitle.style.font,
 							st::currencyFg->c);
 					}, .margin = st::channelEarnCurrencyLearnMargins });
@@ -1513,7 +1512,7 @@ void AddEmojiToMajor(
 		auto helper = Ui::Text::CustomEmojiHelper();
 		auto icon = helper.paletteDependent({
 			.factory = [=] {
-				return Ui::Earn::IconCurrencyColored(
+				return Ui::Earn::IconCurrencyTwoTone(
 					st.style.font,
 					!isIn
 					? st::currencyFg->c

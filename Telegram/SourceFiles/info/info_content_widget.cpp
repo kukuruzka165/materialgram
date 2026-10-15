@@ -14,6 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_forum_topic.h"
 #include "data/data_forum.h"
+#include "data/data_saved_messages.h"
+#include "data/data_user.h"
 #include "info/profile/info_profile_widget.h"
 #include "info/media/info_media_widget.h"
 #include "info/common_groups/info_common_groups_widget.h"
@@ -36,9 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_info.h"
 #include "styles/style_profile.h"
-#include "styles/style_layers.h"
-
-#include <QtCore/QCoreApplication>
 
 namespace Info {
 namespace {
@@ -111,6 +110,13 @@ ContentWidget::ContentWidget(
 	) | rpl::on_next([this] {
 		updateControlsGeometry();
 	}, lifetime());
+
+	_scroll->scrollTopChanges(
+	) | rpl::on_next([this] {
+		if (!_applyingScrollTopRestore) {
+			_scrollTopRestore = std::nullopt;
+		}
+	}, lifetime());
 }
 
 void ContentWidget::resizeEvent(QResizeEvent *e) {
@@ -123,7 +129,6 @@ void ContentWidget::updateControlsGeometry() {
 	}
 	_innerWrap->resizeToWidth(width());
 
-	auto newScrollTop = _scroll->scrollTop() + _topDelta;
 	auto scrollGeometry = rect().marginsRemoved(
 		{ 0, _scrollTopSkip.current(), 0, _scrollBottomSkip.current() });
 	if (_scroll->geometry() != scrollGeometry) {
@@ -131,9 +136,6 @@ void ContentWidget::updateControlsGeometry() {
 	}
 
 	if (!_scroll->isHidden()) {
-		if (_topDelta) {
-			_scroll->scrollToY(newScrollTop);
-		}
 		auto scrollTop = _scroll->scrollTop();
 		_innerWrap->setVisibleTopBottom(
 			scrollTop,
@@ -170,21 +172,6 @@ void ContentWidget::paintEvent(QPaintEvent *e) {
 	}
 }
 
-void ContentWidget::setGeometryWithTopMoved(
-		const QRect &newGeometry,
-		int topDelta) {
-	_topDelta = topDelta;
-	auto willBeResized = (size() != newGeometry.size());
-	if (geometry() != newGeometry) {
-		setGeometry(newGeometry);
-	}
-	if (!willBeResized) {
-		QResizeEvent fake(size(), size());
-		QCoreApplication::sendEvent(this, &fake);
-	}
-	_topDelta = 0;
-}
-
 Ui::RpWidget *ContentWidget::doSetInnerWidget(
 		object_ptr<RpWidget> inner) {
 	using namespace rpl::mappers;
@@ -198,20 +185,26 @@ Ui::RpWidget *ContentWidget::doSetInnerWidget(
 
 	setupSwipeHandler(_innerWrap);
 
-	// MSVC BUG + REGRESSION rpl::mappers::tuple :(
 	rpl::combine(
 		_scroll->scrollTopValue(),
 		_scroll->heightValue(),
-		_innerWrap->entity()->desiredHeightValue()
+		_innerWrap->entity()->desiredHeightValue(),
+		tuple(_1, _1 + _2, _3)
 	) | rpl::on_next([this](
 			int top,
-			int height,
+			int bottom,
 			int desired) {
-		const auto bottom = top + height;
 		_innerDesiredHeight = desired;
 		_innerWrap->setVisibleTopBottom(top, bottom);
 		_scrollTillBottomChanges.fire_copy(
 			std::max(desired + _innerTopReserve - bottom, 0));
+	}, _innerWrap->lifetime());
+
+	rpl::merge(
+		_scroll->heightValue() | rpl::to_empty,
+		_innerWrap->heightValue() | rpl::to_empty
+	) | rpl::on_next([=] {
+		applyScrollTopRestore();
 	}, _innerWrap->lifetime());
 
 	rpl::combine(
@@ -381,7 +374,21 @@ rpl::producer<int> ContentWidget::scrollTopValue() const {
 }
 
 void ContentWidget::scrollTopRestore(int scrollTop) {
-	_scroll->scrollToY(scrollTop);
+	_scrollTopRestore = scrollTop;
+	applyScrollTopRestore();
+}
+
+void ContentWidget::applyScrollTopRestore() {
+	if (!_scrollTopRestore || _applyingScrollTopRestore) {
+		return;
+	}
+	const auto top = *_scrollTopRestore;
+	if (_scroll->scrollTopMax() >= top) {
+		_scrollTopRestore = std::nullopt;
+	}
+	_applyingScrollTopRestore = true;
+	_scroll->scrollToY(top);
+	_applyingScrollTopRestore = false;
 }
 
 void ContentWidget::scrollTo(const Ui::ScrollToRequest &request) {
@@ -626,6 +633,8 @@ Key ContentMemento::key() const {
 		return Key(topic);
 	} else if (const auto sublist = this->sublist()) {
 		return Key(sublist);
+	} else if (const auto savedMessages = this->savedMessages()) {
+		return Key(savedMessages);
 	} else if (const auto peer = this->peer()) {
 		return Key(peer);
 	} else if (const auto poll = this->poll()) {
@@ -677,6 +686,12 @@ ContentMemento::ContentMemento(
 			}
 		}, _lifetime);
 	}
+}
+
+ContentMemento::ContentMemento(not_null<Data::SavedMessages*> savedMessages)
+: _peer(savedMessages->session().user().get())
+, _savedMessages(savedMessages) {
+	Expects(!savedMessages->parentChat());
 }
 
 ContentMemento::ContentMemento(Settings::Tag settings)

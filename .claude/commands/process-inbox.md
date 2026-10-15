@@ -11,6 +11,17 @@ with the Claude adapter's delegation and text-handling substitutions. Process
 the ignored inbox associated with the current Telegram Desktop checkout. Route
 and plan tasks only; do not implement, build, or test them.
 
+Preserve the shared skill's project-continuity bias. A request derived from
+existing project work stays in that project unless it passes the skill's
+affirmative independence test; shared or cross-surface files alone do not make
+it standalone.
+
+Apply the shared receipt-only disposition to requests whose sole purpose is
+moving an existing commit between branches. Never create backport,
+forward-port, cherry-pick, rebase, merge, or branch-sync tasks. A real product
+task may depend on the approved source task; that dependency is the lineage
+record and does not need an integration companion task.
+
 Parallel task work is expected. Use the shared skill's `inbox_worktree`,
 `inbox_branch`, and `inbox-*` helper commands exactly as documented. Never
 substitute the task `slot_worktree`, stop merely because that slot is dirty, or

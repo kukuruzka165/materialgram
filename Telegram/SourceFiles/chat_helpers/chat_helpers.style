@@ -11,6 +11,7 @@ using "boxes/boxes.style";
 using "ui/layers/layers.style";
 using "ui/widgets/widgets.style";
 using "ui/menu_icons.style";
+using "ui/effects/premium_limits.style";
 using "ui/effects/premium.style";
 
 GroupCallUserpics {
@@ -65,6 +66,15 @@ ComposeIcons {
 	menuRecentRemove: icon;
 	menuGifAdd: icon;
 	menuGifRemove: icon;
+	menuGifCaption: icon;
+	menuSetAdd: icon;
+	menuSetShare: icon;
+	menuSetCopyLink: icon;
+	menuSetRemove: icon;
+	menuEmojiStatus: icon;
+	menuEmojiCopy: icon;
+	menuEmojiViewPack: icon;
+	menuEmojiRemoveRecent: icon;
 	menuMute: icon;
 	menuSchedule: icon;
 	menuWhenOnline: icon;
@@ -72,6 +82,8 @@ ComposeIcons {
 	menuBelow: icon;
 	menuAbove: icon;
 	menuQualityHigh: icon;
+	menuCover: icon;
+	menuCoverRemove: icon;
 	menuPrice: icon;
 	menuEditStars: icon;
 
@@ -117,6 +129,7 @@ EmojiPan {
 	fadeLeft: icon;
 	fadeRight: icon;
 	menu: PopupMenu;
+	menuAttention: Menu;
 	expandedSeparator: MenuSeparator;
 	tabs: SettingsSlider;
 	search: TabbedSearch;
@@ -130,6 +143,7 @@ EmojiPan {
 	searchPackTextTop: pixels;
 	searchPackTextPadding: pixels;
 	searchPacksBottom: pixels;
+	searchPackRipple: RippleAnimation;
 	searchResultsHeight: pixels;
 	searchResultsTextTop: pixels;
 	searchSwapDuration: int;
@@ -138,6 +152,9 @@ EmojiPan {
 	searchBackIconTop: pixels;
 	searchBackTextLeft: pixels;
 	searchBackTextTop: pixels;
+	photoButtonIcon: icon;
+	audioButtonIcon: icon;
+	linkButtonIcon: icon;
 	colorAll: IconButton;
 	colorAllLabel: FlatLabel;
 	removeSet: IconButton;
@@ -172,6 +189,8 @@ SendButton {
 	recordSize: size;
 	sendDisabledFg: color;
 	sendIconFg: color;
+	stopSize: size;
+	stopRadius: pixels;
 }
 
 RecordBarLock {
@@ -360,6 +379,7 @@ emojiPanExpand: RoundButton(defaultActiveButton) {
 	height: 19px;
 	textTop: 1px;
 }
+emojiPanExpandTightWidth: -4px;
 
 stickersTrendingAddTop: 14px;
 stickersTrendingAdd: RoundButton(defaultActiveButton) {
@@ -438,6 +458,30 @@ stickersScroll: ScrollArea(boxScroll) {
 	deltat: 19px;
 	deltab: 9px;
 }
+stickerSetBox: Box(defaultBox) {
+	buttonPadding: margins(16px, 12px, 16px, 12px);
+	buttonHeight: 42px;
+	buttonWide: true;
+	button: RoundButton(defaultActiveButton) {
+		height: 42px;
+		textTop: 12px;
+		style: semiboldTextStyle;
+	}
+}
+stickerSetBoxRemoveButton: RoundButton(attentionBoxButton) {
+	height: 42px;
+	textTop: 12px;
+	style: semiboldTextStyle;
+}
+stickerSetBoxMenu: IconButton(boxTitleClose) {
+	width: 40px;
+
+	icon: icon {{ "title_menu_dots", boxTitleCloseFg }};
+	iconOver: icon {{ "title_menu_dots", boxTitleCloseFgOver }};
+
+	rippleAreaPosition: point(0px, 4px);
+}
+stickerSetBoxBadgeSkip: 6px;
 stickersRowDisabledOpacity: 0.4;
 stickersRowDuration: 200;
 
@@ -446,38 +490,10 @@ stickersAddCellPlusThickness: 2px;
 stickersAddCellBgRadius: 28px;
 emojiSetAddCellPlusSize: 13px;
 emojiSetAddCellBgRadius: 16px;
+stickersAddPanelSkip: 8px;
 
-stickersEmojiPickerExpandedRadius: 20px;
-stickersEmojiPickerBg: emojiPanBg;
-stickersEmojiPickerPadding: margins(12px, 8px, 12px, 0px);
-stickersEmojiPickerItemSize: 30px;
-stickersEmojiPickerItemSkip: 4px;
-stickersEmojiPickerStripHeight: 40px;
-stickersEmojiPickerExpandedHeight: 220px;
+
 stickersEmojiPickerSelectedBg: windowBgActive;
-stickersEmojiPickerScroll: ScrollArea(boxScroll) {
-	width: 14px;
-	deltax: 5px;
-	deltat: 4px;
-	deltab: 18px;
-}
-stickersEmojiPickerAbout: FlatLabel(defaultFlatLabel) {
-	minWidth: 100px;
-	align: align(top);
-	textFg: windowSubTextFg;
-	style: TextStyle(defaultTextStyle) {
-		font: font(12px);
-	}
-}
-stickersEmojiPickerExpandIcon: icon {{ "intro_country_dropdown", windowSubTextFg }};
-stickersEmojiPickerCollapseIcon: icon {{ "intro_country_dropdown-flip_vertical", windowSubTextFg }};
-stickersEmojiPickerExpandSize: 24px;
-stickersEmojiPickerExpandBg: windowBgRipple;
-stickersEmojiPickerBoxShadow: BoxShadow {
-	blurRadius: 20px;
-	offset: point(0px, 6px);
-	opacity: 0.22;
-}
 
 emojiStatusDefault: icon {{ "emoji/stickers_premium", emojiIconFg }};
 
@@ -618,6 +634,13 @@ stickerIconMove: 400;
 stickerPreviewDuration: 150;
 stickerPreviewMin: 0.1;
 stickerPanFirstAfterShortcutsSkip: 4px;
+stickersPhotoRowPadding: margins(0px, 12px, 0px, 12px);
+stickersPhotoButtonHeight: 36px;
+stickersPhotoButtonRadius: 8px;
+stickersPhotoButtonPadding: margins(6px, 0px, 12px, 0px);
+stickersPhotoButtonIconSkip: 4px;
+stickersPhotoButtonFont: font(14px bold);
+stickersPhotoButtonSkip: 10px;
 mediaPreviewPhotoSkip: 48px;
 
 emojiPanColorAll: IconButton(stickerPanRemoveSet) {
@@ -715,6 +738,15 @@ defaultComposeIcons: ComposeIcons {
 	menuRecentRemove: menuIconDelete;
 	menuGifAdd: menuIconGif;
 	menuGifRemove: menuIconDelete;
+	menuGifCaption: menuIconEdit;
+	menuSetAdd: menuIconAdd;
+	menuSetShare: menuIconShare;
+	menuSetCopyLink: menuIconLink;
+	menuSetRemove: menuIconDelete;
+	menuEmojiStatus: menuIconEmoji;
+	menuEmojiCopy: menuIconCopy;
+	menuEmojiViewPack: menuIconShowAll;
+	menuEmojiRemoveRecent: menuIconCancel;
 	menuMute: menuIconMute;
 	menuSchedule: menuIconSchedule;
 	menuWhenOnline: menuIconWhenOnline;
@@ -722,6 +754,8 @@ defaultComposeIcons: ComposeIcons {
 	menuBelow: menuIconBelow;
 	menuAbove: menuIconAbove;
 	menuQualityHigh: menuIconQualityHigh;
+	menuCover: menuIconEdit;
+	menuCoverRemove: menuIconCancel;
 	menuPrice: menuIconEarn;
 
 	stripExpandPanel: icon{{ "chat/reactions_expand_panel", windowSubTextFg }};
@@ -764,6 +798,7 @@ defaultEmojiPan: EmojiPan {
 	fadeLeft: icon {{ "fade_horizontal-flip_horizontal", emojiPanCategories }};
 	fadeRight: icon {{ "fade_horizontal", emojiPanCategories }};
 	menu: popupMenuWithIcons;
+	menuAttention: menuWithIconsAttention;
 	expandedSeparator: MenuSeparator(defaultMenuSeparator) {
 		padding: margins(0px, 4px, 0px, 4px);
 		width: 6px;
@@ -780,6 +815,7 @@ defaultEmojiPan: EmojiPan {
 	searchPackTextTop: 55px;
 	searchPackTextPadding: 5px;
 	searchPacksBottom: 0px;
+	searchPackRipple: defaultRippleAnimation;
 	searchResultsHeight: 20px;
 	searchResultsTextTop: 3px;
 	searchSwapDuration: 100;
@@ -788,6 +824,9 @@ defaultEmojiPan: EmojiPan {
 	searchBackIconTop: 6px;
 	searchBackTextLeft: 40px;
 	searchBackTextTop: 10px;
+	photoButtonIcon: icon {{ "photo_editor/camera-24x24", windowFg }};
+	audioButtonIcon: icon {{ "photo_editor/widget_music", windowFg }};
+	linkButtonIcon: icon {{ "limits/links", windowFg }};
 	colorAll: emojiPanColorAll;
 	colorAllLabel: emojiPanColorAllLabel;
 	removeSet: stickerPanRemoveSet;
@@ -921,6 +960,11 @@ reactPanelScrollRounded: ScrollArea(emojiScroll) {
 selfForwardsTaggerStripSkip: 11px;
 
 toastLottieIconSize: size(20px, 20px);
+textCopiedToastLoading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
+	color: toastFg;
+	thickness: 2px;
+	size: toastLottieIconSize;
+}
 selfForwardsTaggerIconPadding: margins(14px, 2px, 8px, 2px);
 selfForwardsTaggerToast: Toast(defaultToast) {
 	minWidth: 160px;
@@ -1054,6 +1098,7 @@ historyBusinessBotPhoto: UserpicButton(defaultUserpicButton) {
 }
 historyBusinessBotName: FlatLabel(defaultFlatLabel) {
 	style: semiboldTextStyle;
+	maxHeight: 20px;
 }
 historyBusinessBotStatus: FlatLabel(historyContactStatusLabel) {
 	textFg: windowSubTextFg;
@@ -1203,6 +1248,16 @@ historyUnreadPollVotes: TwoIconButton(historyToDown) {
 	iconAbove: icon {{ "history_unread_poll_vote-40x40", historyToDownFg, point(6px, 6px) }};
 	iconAboveOver: icon {{ "history_unread_poll_vote-40x40", historyToDownFgOver, point(6px, 6px) }};
 }
+historyStash: TwoIconButton(historyToDown) {
+	iconAbove: icon {{ "history_stash_bubble-40x40", historyToDownFg, point(6px, 6px) }};
+	iconAboveOver: icon {{ "history_stash_bubble-40x40", historyToDownFgOver, point(6px, 6px) }};
+}
+historyStashArrow: icon {{ "history_stash_arrow-40x40", historyToDownFg, point(6px, 6px) }};
+historyStashArrowOver: icon {{ "history_stash_arrow-40x40", historyToDownFgOver, point(6px, 6px) }};
+historyStashArrowClipPosition: point(18px, 28px);
+historyStashArrowClipSize: size(16px, 12px);
+historyStashArrowTravel: 12px;
+historyStashBubbleTravel: 4px;
 historyUnreadThingsSkip: 4px;
 
 historyQuoteStyle: QuoteStyle(defaultQuoteStyle) {
@@ -1251,7 +1306,6 @@ historyComposeField: InputField(defaultInputField) {
 	duration: 100;
 }
 historyComposeFieldMaxHeight: 224px;
-historyRichMessagePreviewHeight: 72px;
 historyComposeFieldFadeHeight: 6px;
 historySendRight: 2px;
 historySendPadding: 9px;
@@ -1383,16 +1437,10 @@ historyRecordVoiceFgOver: historyComposeIconFgOver;
 historyRecordVoiceFgInactive: attentionButtonFg;
 historyRecordVoiceFgActive: windowBgActive;
 historyRecordVoiceFgActiveIcon: windowFgActive;
-historyRecordVoiceOnceBg: icon {{ "voice_lock/audio_once_bg", historySendIconFg }};
-historyRecordVoiceOnceFg: icon {{ "voice_lock/audio_once_number", windowFgActive }};
-historyRecordVoiceOnceInactive: icon {{ "chat/audio_once", windowSubTextFg }};
 historyRecordSendIconPosition: point(2px, 0px);
 historyRecordVoiceRippleBgActive: lightButtonBgOver;
-historyRecordSignalRadius: 5px;
 historyRecordCancel: windowSubTextFg;
 historyRecordCancelActive: historySendIconFg;
-historyRecordFont: font(13px);
-historyRecordDurationSkip: 12px;
 historyRecordDurationFg: historyComposeAreaFg;
 
 historyRecordMainBlobMinRadius: 23px;
@@ -1402,36 +1450,13 @@ historyRecordMinorBlobMaxRadius: 47px;
 historyRecordMajorBlobMinRadius: 43px;
 historyRecordMajorBlobMaxRadius: 50px;
 
-historyRecordTextStyle: TextStyle(defaultTextStyle) {
-	font: historyRecordFont;
-}
-
-historyRecordTextWidthForWrap: 210px;
-historyRecordTextLeft: 15px;
-historyRecordTextRight: 25px;
-
-historyRecordLockShowDuration: historyToDownDuration;
-historyRecordLockSize: size(75px, 133px);
-
-historyRecordLockIconSize: size(14px, 17px);
-historyRecordLockIconBottomHeight: 9px;
-historyRecordLockIconLineHeight: 2px;
-historyRecordLockIconLineSkip: 3px;
-historyRecordLockIconLineWidth: 2px;
-historyRecordLockIconArcHeight: 4px;
-historyRecordStopIconWidth: 12px;
-
 historyRecordLockTopShadow: icon {{ "voice_lock/record_lock_top_shadow", historyToDownShadow }};
 historyRecordLockTop: icon {{ "voice_lock/record_lock_top", sideBarBg }};
 historyRecordLockBottomShadow: icon {{ "voice_lock/record_lock_bottom_shadow", historyToDownShadow }};
 historyRecordLockBottom: icon {{ "voice_lock/record_lock_bottom", sideBarBg }};
 historyRecordLockBodyShadow: icon {{ "voice_lock/record_lock_body_shadow", historyToDownShadow }};
 historyRecordLockBody: icon {{ "voice_lock/record_lock_body", sideBarBg }};
-historyRecordLockMargin: margins(4px, 4px, 4px, 4px);
 historyRecordLockArrow: icon {{ "voice_lock/voice_arrow", windowBgActive }};
-historyRecordLockInput: icon {{ "voice_lock/input_mic_s", windowBgActive }};
-historyRecordLockRound: icon {{ "voice_lock/input_round_s", windowBgActive }};
-historyRecordLockRippleMargin: margins(6px, 6px, 6px, 6px);
 
 historyRecordDelete: IconButton(historyAttach) {
 	icon: icon {{ "voice_lock/recorded_delete", historyComposeIconFg }};
@@ -1439,24 +1464,7 @@ historyRecordDelete: IconButton(historyAttach) {
 	iconPosition: point(10px, 11px);
 }
 historyRecordWaveformBgMargins: margins(5px, 8px, 5px, 9px);
-historyRecordWaveformBgRadius: 7px;
-historyRecordWaveformOutsideAlpha: 0.6;
-historyRecordWaveformInactiveAlpha: 0.7;
-historyRecordCenterControlHeight: 18px;
-historyRecordCenterControlIconScale: 0.6;
-historyRecordCenterControlPadding: 4px;
-historyRecordCenterControlTextSkip: 2px;
-historyRecordCenterControlMinimumProgressPadding: 5px;
 
-historyRecordWaveformBar: 3px;
-historyRecordTrimHandleWidth: 10px;
-historyRecordTrimHandleInnerSize: size(2px, 8px);
-
-historyRecordLockPosition: point(1px, 22px);
-
-historyRecordCancelButtonWidth: 100px;
-
-historyRecordTooltipSkip: 8px;
 historyRecordTooltip: ImportantTooltip(defaultImportantTooltip) {
 	padding: margins(4px, 4px, 4px, 4px);
 	radius: 11px;
@@ -1508,6 +1516,8 @@ historySend: SendButton {
 	recordSize: size(26px, 26px);
 	sendDisabledFg: historyComposeIconFg;
 	sendIconFg: historySendIconFg;
+	stopSize: size(14px, 14px);
+	stopRadius: 3px;
 }
 historyAiComposeButton: IconButton(historyAttach) {
 	width: 28px;
@@ -1526,6 +1536,13 @@ historySendAsFileButton: IconButton(historyAiComposeButton) {
 historyExpandComposeButton: IconButton(historyAiComposeButton) {
 	icon: icon {{ "menu/rich/expand-20x20", historyComposeIconFg }};
 	iconOver: icon {{ "menu/rich/expand-20x20", historyComposeIconFgOver }};
+}
+historyDiscardRichDraftButton: IconButton(historyAiComposeButton) {
+	width: 34px;
+	height: 34px;
+	rippleAreaSize: 34px;
+	icon: icon {{ "chat/input_discard-26x26", historyComposeIconFg }};
+	iconOver: icon {{ "chat/input_discard-26x26", historyComposeIconFgOver }};
 }
 historyAiComposeTooltipSkip: 8px;
 importantTooltipHide: IconButton(defaultIconButton) {
@@ -1749,65 +1766,7 @@ paidTagLabel: FlatLabel(defaultFlatLabel) {
 }
 paidTagPadding: margins(16px, 6px, 16px, 6px);
 
-pickLocationWindow: size(364px, 680px);
-pickLocationMapHeight: 220px;
-pickLocationCollapsedHeight: 92px;
 pickLocationRowHeight: 52px;
-pickLocationButton: FlatButton {
-	height: pickLocationRowHeight;
-	bgColor: contactsBg;
-	overBgColor: contactsBgOver;
-	ripple: defaultRippleAnimation;
-}
-pickLocationButtonText: FlatLabel(defaultFlatLabel) {
-	minWidth: 128px;
-	maxHeight: 20px;
-	style: semiboldTextStyle;
-	textFg: windowBoldFg;
-}
-pickLocationButtonStatus: FlatLabel(defaultFlatLabel) {
-	minWidth: 128px;
-	maxHeight: 20px;
-	textFg: windowSubTextFg;
-}
-pickLocationButtonSkip: 6px;
-pickLocationSendIcon: icon{{ "chat/filled_location", windowFgActive }};
-pickLocationVenueItem: PeerListItem(defaultPeerListItem) {
-	height: pickLocationRowHeight;
-	photoSize: 42px;
-	photoPosition: point(18px, 5px);
-	namePosition: point(70px, 7px);
-	statusPosition: point(70px, 27px);
-	button: OutlineButton(defaultPeerListButton) {
-		textBg: contactsBg;
-		textBgOver: contactsBgOver;
-		font: normalFont;
-		padding: margins(11px, 5px, 11px, 5px);
-		ripple: defaultRippleAnimation;
-	}
-	statusFg: contactsStatusFg;
-	statusFgOver: contactsStatusFgOver;
-	statusFgActive: contactsStatusFgOnline;
-}
-pickLocationVenueList: PeerList(defaultPeerList) {
-	item: pickLocationVenueItem;
-	padding: margins(0px, 0px, 0px, 0px);
-}
-pickLocationIconSkip: 6px;
-pickLocationLoading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
-	size: size(56px, 56px);
-	color: windowSubTextFg;
-	thickness: 4px;
-}
-pickLocationPromoHeight: 32px;
-pickLocationChooseOnMap: RoundButton(defaultActiveButton) {
-	height: 44px;
-	textTop: 11px;
-	width: -96px;
-	style: TextStyle(semiboldTextStyle) {
-		font: font(15px semibold);
-	}
-}
 
 sendGifBox: Box(defaultBox) {
 	shadowIgnoreBottomSkip: true;
