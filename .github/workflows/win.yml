@@ -33,6 +33,13 @@ jobs:
           general_include: ".+"
           general_exclude: "^(VisualStudio/(2022|All)|DotNet|VCPkg)"
 
+      - name: Enlarge pagefile.
+        uses: al-cheb/configure-pagefile-action@v1.5
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "D:"
+
       - name: Prepare directories.
         run: |
           mkdir %userprofile%\TBuild\Libraries
