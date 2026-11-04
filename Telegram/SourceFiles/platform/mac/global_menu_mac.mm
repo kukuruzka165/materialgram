@@ -97,6 +97,7 @@ private:
 	// BeforeWaiting before the next NSEvent dispatches, so menu state
 	// is fresh by the time Cmd+C reaches AppKit's performKeyEquivalent.
 	std::unique_ptr<SingleQueuedInvokation> _scheduledUpdate;
+	QAction *_about = nullptr;
 	QAction *_logout = nullptr;
 	QAction *_undo = nullptr;
 	QAction *_redo = nullptr;
@@ -175,6 +176,12 @@ bool Manager::clipboardHasText() {
 }
 
 void Manager::retranslate() {
+	if (_about) {
+		_about->setText(tr::lng_mac_menu_about_telegram(
+			tr::now,
+			lt_telegram,
+			u"materialgram"_q));
+	}
 	if (_logout) {
 		_logout->setText(tr::lng_mac_menu_logout(tr::now));
 	}
@@ -354,13 +361,10 @@ void Manager::buildAppleMenu(QMenu *main) {
 				window->show(Box(AboutBox));
 			});
 		};
-		const auto about = main->addAction(
-			tr::lng_mac_menu_about_telegram(
-				tr::now,
-				lt_telegram,
-				u"materialgram"_q),
+		_about = main->addAction(
+			u"About materialgram"_q,
 			std::move(callback));
-		about->setMenuRole(QAction::AboutQtRole);
+		_about->setMenuRole(QAction::AboutQtRole);
 	}
 
 	main->addSeparator();
@@ -629,7 +633,7 @@ void Manager::destroy() {
 	_lifetime.destroy();
 	_menuBar.reset();
 	_languageBound = false;
-	_logout = _undo = _redo = _cut = _copy = _paste = _delete
+	_about = _logout = _undo = _redo = _cut = _copy = _paste = _delete
 		= _selectAll = _contacts = _addContact = _newGroup
 		= _newChannel = _showTelegram = _fullScreen = _emoji
 		= _bold = _italic = _underline
