@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-tdesktop-theme">
+    <comment>Telegram Desktop theme</comment>
+    <!-- Weight above zip magic (50): these files ARE zips, but the
+      specific extension must win so file managers offer the client. -->
+    <glob weight="80" pattern="*.tdesktop-theme"/>
+  </mime-type>
+  <mime-type type="application/x-tdesktop-palette">
+    <comment>Telegram Desktop palette</comment>
+    <glob pattern="*.tdesktop-palette"/>
+  </mime-type>
+</mime-info>
