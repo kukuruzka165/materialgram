@@ -68,6 +68,17 @@ Or you can use this script
 sudo sh -c "curl -s https://raw.githubusercontent.com/materialgram/arch/x86_64/installer.sh | bash"
 ```
 
+## For Gentoo users
+
+You can install Materialgram from the [Darllowin Overlay](https://github.com/Darllowin/darllowin-overlay.git):
+
+```bash
+eselect repository add darllowin_overlay git https://github.com/Darllowin/darllowin-overlay.git
+emaint sync -r darllowin_overlay
+emerge -av net-im/materialgram
+```
+
+
 ## Build instructions
 * [Windows 64-bit][win64]
 * [macOS][mac]
