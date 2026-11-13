@@ -356,7 +356,6 @@ historyForwardChooseFont: font(16px);
 
 historyCallWidth: 240px;
 historyCallHeight: 56px;
-
 historyCallIconPosition: point(12px, 10px);
 historyCallLeft: 16px;
 historyCallTop: 9px;

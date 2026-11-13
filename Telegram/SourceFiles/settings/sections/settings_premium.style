@@ -34,6 +34,6 @@ settingsPremiumIconAiCompose: icon{
 	{ "chat/ai_star1-20x20", windowFgActive, point(2px, 2px) },
 	{ "chat/ai_star2-20x20", windowFgActive, point(2px, 2px) },
 };
-settingsPremiumIconRich: icon {{ "settings/premium/rich", settingsIconFg }};
+settingsPremiumIconRich: icon {{ "settings/premium/rich", windowFgActive }};
 settingsPremiumUserHeight: 205px;
 settingsPremiumUserTitlePadding: margins(0px, 16px, 0px, 6px);

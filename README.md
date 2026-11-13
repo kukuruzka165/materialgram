@@ -47,6 +47,7 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 - Improved voice messages bitrate (32 to 256)
 - Hide your phone number in profile and settings (except "My account" screen)
 - Hide phone number for non-contacts in top bar
+- Show mutual contacts
 - Show more recent stickers
 - Show online counter in large groups (experimental)
 - Show the approximate date of account creation (optional)

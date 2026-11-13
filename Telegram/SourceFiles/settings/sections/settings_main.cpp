@@ -32,7 +32,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_memento.h"
 #include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_emoji_status_panel.h"
-#include "info/profile/info_profile_phone_menu.h"
 #include "info/profile/info_profile_values.h"
 #include "info/stories/info_stories_widget.h"
 #include "lang/lang_cloud_manager.h"
@@ -114,7 +113,6 @@ public:
 private:
 	void setupChildGeometry();
 	void initViewers();
-	void updatePhoneText();
 	void refreshNameGeometry(int newWidth);
 	void refreshUsernameGeometry(int newWidth);
 	void refreshQrButtonGeometry(int newWidth);

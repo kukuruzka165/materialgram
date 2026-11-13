@@ -24,8 +24,10 @@ StartWidget::StartWidget(
 	not_null<Main::Account*> account,
 	not_null<Data*> data)
 : Step(parent, account, data, true) {
-	Window::Theme::Apply(":/gui/Google Day.tdesktop-theme");
-	Window::Theme::KeepApplied();
+	if (Window::Theme::Background()->themeObject().content.isEmpty()) {
+		Window::Theme::Apply(u":/gui/Google Day.tdesktop-theme"_q);
+		Window::Theme::KeepApplied();
+	}
 	setMouseTracking(true);
 	setTitleText(rpl::single(u"materialgram"_q));
 	setDescriptionText(tr::lng_materialgram_intro_about());

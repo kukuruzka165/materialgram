@@ -345,18 +345,17 @@ void Content::createBubble() {
 
 	const auto scaleOffset = QPoint(0, innerGeometry.y());
 	const auto paintOffsetLeft = innerGeometry.x()
-	- _bubble.offsetFromContent.x();
+		- _bubble.offsetFromContent.x();
 
 	const auto hasCommentsButton = currentView->data()->repliesAreComments()
-	|| currentView->data()->externalReply();
-
+		|| currentView->data()->externalReply();
 	_bubble.widget->resize(innerGeometry.size()
-	+ QSize(
-		(_isText && currentView->data()->isPost()
-		? rect::m::sum::h(st::msgPadding)
-		+ st::historyFastShareSize
-		: 0),
-		 (hasCommentsButton || _isText) ? innerGeometry.y() : 0));
+		+ QSize(
+			(_isText && currentView->data()->isPost()
+				? rect::m::sum::h(st::msgPadding)
+					+ st::historyFastShareSize
+				: 0),
+			(hasCommentsButton || _isText) ? innerGeometry.y() : 0));
 	_bubble.widget->show();
 
 	_bubble.widget->stackUnder(this);

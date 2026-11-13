@@ -163,7 +163,6 @@ private:
 	void paintFadingExpandIcon(QPainter &p, float64 progress);
 	void paintExpanded(QPainter &p);
 	void paintNonTransparentExpandRect(QPainter &p, const QRect &) const;
-	void paintBubble(QPainter &p, int innerWidth);
 	void paintBackgroundToBuffer();
 
 	ExpandingRects updateExpandingRects(float64 progress);

@@ -50,6 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_messages.h"
 #include "data/data_message_reactions.h"
 #include "data/data_saved_sublist.h"
+#include "data/data_ai_compose_tones.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/data_chat.h"
@@ -4125,7 +4126,7 @@ void ComposeControls::initSendButton() {
 	const auto send = crl::guard(_send.get(), [=](Api::SendOptions options) {
 		_sendCustomRequests.fire(std::move(options));
 	});
-	setupSendMenu(_send.get(), send);
+	setupSendMenu(_send.get(), send, true);
 
 	_send->widthValue() | rpl::skip(1) | rpl::on_next([=] {
 		updateControlsGeometry(_wrap->size());
@@ -4134,7 +4135,8 @@ void ComposeControls::initSendButton() {
 
 void ComposeControls::setupSendMenu(
 		not_null<Ui::RpWidget*> button,
-		Fn<void(Api::SendOptions)> send) {
+		Fn<void(Api::SendOptions)> send,
+		bool withAiCompose) {
 	using namespace SendMenu;
 	const auto sendAction = [=](Action action, Details details) {
 		if (action.type == ActionType::AiCompose) {
@@ -4161,7 +4163,13 @@ void ComposeControls::setupSendMenu(
 	SendMenu::SetupMenuAndShortcuts(
 		button,
 		_show,
-		[=] { return sendButtonMenuDetails(); },
+		[=] {
+			auto result = sendButtonMenuDetails();
+			result.aiComposeAllowed = withAiCompose
+				&& HasSendText(_field)
+				&& !session().data().aiComposeTones().list().empty();
+			return result;
+		},
 		sendAction,
 		&_st.tabbed.menu,
 		&_st.tabbed.icons);
@@ -5407,7 +5415,7 @@ void ComposeControls::showAiComposeBox() {
 		setupMenu = crl::guard(_wrap.get(), [=](
 				not_null<Ui::RpWidget*> button,
 				Fn<void(Api::SendOptions)> sendCallback) {
-			setupSendMenu(button, sendCallback);
+			setupSendMenu(button, sendCallback, false);
 		});
 	}
 	Controls::ShowComposeAiBox(_show, {

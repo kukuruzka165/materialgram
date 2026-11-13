@@ -1139,7 +1139,6 @@ void StickerSetBox::updateButtons() {
 						if (const auto strong = top.data()) {
 							strong->setForceRippled(false);
 						}
-
 					});
 				});
 				const auto position = QPoint(

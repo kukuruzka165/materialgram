@@ -198,14 +198,17 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 		const QString &addToLink) {
 	const auto weak = base::make_weak(controller);
 	return [=](QString link) {
+		const auto linkPrefix = u"internal:username_link/"_q;
+		if (addToLink.isEmpty() && link.startsWith(linkPrefix)) {
+			link = u"internal:username_regular/"_q
+				+ link.mid(linkPrefix.size());
+		}
 		if (link.startsWith(u"internal:"_q)) {
 			Core::App().openInternalUrl(link,
 				QVariant::fromValue(ClickHandlerContext{
 					.sessionWindow = weak,
-					}));
+				}));
 			return;
-		} else if (addToLink.isEmpty()) {
-			link = "@" + peer->username();
 		} else if (!link.startsWith(u"https://"_q)) {
 			link = peer->session().createInternalLinkFull(peer->username())
 				+ addToLink;

@@ -228,7 +228,7 @@ std::vector<EmbeddedScheme> EmbeddedThemes() {
 	};
 	const auto name = [](auto key) {
 		return rpl::deferred([=] { return key(); });
-		};
+	};
 	return {
 		EmbeddedScheme{
 			EmbeddedType::DayBlue,
@@ -241,7 +241,7 @@ std::vector<EmbeddedScheme> EmbeddedThemes() {
 			":/gui/Google Day.tdesktop-theme",
 			qColor("b9cf7a")
 		},
-		
+
 		EmbeddedScheme{
 			EmbeddedType::Night,
 			qColor("1b1c17"),
@@ -472,9 +472,9 @@ bool AccentColors::setFromSerialized(const QByteArray &serialized) {
 		const auto color = Serialize::readColor(stream);
 		const auto uncheckedType = static_cast<EmbeddedType>(type);
 		switch (uncheckedType) {
+		case EmbeddedType::Default:
 		case EmbeddedType::DayBlue:
 		case EmbeddedType::Night:
-		case EmbeddedType::Default:
 		case EmbeddedType::NightGreen:
 			data.emplace(uncheckedType, color);
 			break;

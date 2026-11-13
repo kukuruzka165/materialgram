@@ -438,7 +438,8 @@ private:
 	void fileChosen(ChatHelpers::FileChosen &&data);
 	void setupSendMenu(
 		not_null<Ui::RpWidget*> button,
-		Fn<void(SendMenu::Action, SendMenu::Details)> action);
+		Fn<void(SendMenu::Action, SendMenu::Details)> action,
+		bool withAiCompose);
 
 	void updateFieldSubmitSettings();
 	bool clearMaybeSendStart();

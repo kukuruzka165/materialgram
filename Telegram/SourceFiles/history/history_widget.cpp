@@ -50,7 +50,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/effects/message_sending_animation_controller.h"
 #include "ui/text/format_values.h"
-#include "ui/toast/toast.h"
 #include "ui/text/text_utilities.h"
 #include "ui/chat/message_bar.h"
 #include "ui/chat/attach/attach_send_files_way.h"
@@ -448,7 +447,7 @@ HistoryWidget::HistoryWidget(
 		} else {
 			sendScheduled(action.options);
 		}
-	});
+	}, true);
 	_unblock->addClickHandler([=] { unblockUser(); });
 	_botStart->addClickHandler([=] { sendBotStartCommand(); });
 	_joinChannel->addClickHandler([=] { joinChannel(); });
@@ -5496,12 +5495,19 @@ TextWithEntities HistoryWidget::prepareTextForEditMsg() const {
 
 void HistoryWidget::setupSendMenu(
 		not_null<Ui::RpWidget*> button,
-		Fn<void(SendMenu::Action, SendMenu::Details)> action) {
+		Fn<void(SendMenu::Action, SendMenu::Details)> action,
+		bool withAiCompose) {
 	using namespace SendMenu;
 	SetupMenuAndShortcuts(
 		button,
 		controller()->uiShow(),
-		[=] { return sendButtonMenuDetails(); },
+		[=] {
+			auto result = sendButtonMenuDetails();
+			result.aiComposeAllowed = withAiCompose
+				&& fieldHasSendText()
+				&& !session().data().aiComposeTones().list().empty();
+			return result;
+		},
 		[=](Action value, Details details) {
 			if (value.type == ActionType::CaptionUp
 				|| value.type == ActionType::CaptionDown
@@ -5540,7 +5546,8 @@ void HistoryWidget::showAiComposeBox() {
 				button,
 				SendMenu::DefaultCallback(
 					controller()->uiShow(),
-					sendCallback));
+					sendCallback),
+				false);
 		});
 	}
 	HistoryView::Controls::ShowComposeAiBox(controller()->uiShow(), {
@@ -6098,13 +6105,10 @@ SendMenu::Details HistoryWidget::sendMenuDetails() const {
 		? SendMenu::Type::ScheduledToUser
 		: SendMenu::Type::Scheduled;
 	const auto effectAllowed = _peer && _peer->isUser();
-	const auto aiComposeAllowed = _field->hasText()
-		&& !session().data().aiComposeTones().list().empty();
 	return {
 		.type = type,
 		.barePeerId = _peer ? _peer->id.value : 0,
 		.effectAllowed = effectAllowed,
-		.aiComposeAllowed = aiComposeAllowed,
 	};
 }
 

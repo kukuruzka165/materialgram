@@ -205,7 +205,7 @@ private:
 	base::flat_map<FullMsgId, UploadedMedia> _videoWaitingCover;
 
 	FullMsgId _pausedId;
-	base::Timer _nextTimer, _stopSessionsTimer;
+	base::Timer _stopSessionsTimer;
 
 	rpl::event_stream<UploadedMedia> _photoReady;
 	rpl::event_stream<UploadedMedia> _documentReady;

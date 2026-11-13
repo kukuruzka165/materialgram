@@ -619,7 +619,6 @@ int EmojiPickerOverlay::expandedHeight() const {
 void EmojiPickerOverlay::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 	auto hq = PainterHighQualityEnabler(p);
-	const auto progress = currentExpandValue();
 	const auto shown = bubbleShownRect();
 	const auto radius = st::stickersEmojiPickerExpandedRadius;
 

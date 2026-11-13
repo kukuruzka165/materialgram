@@ -811,9 +811,9 @@ bool Histories::postponeEntryRequest(const State &state) const {
 }
 
 void Histories::deleteMessages(
-	not_null<History*> history,
-	const QVector<MTPint> &ids,
-	bool revoke) {
+		not_null<History*> history,
+		const QVector<MTPint> &ids,
+		bool revoke) {
 	const auto totalIds = ids.count();
 	const auto numBatches = (totalIds + MaxSelectedItems - 1) / MaxSelectedItems;
 	auto processBatch = [&](auto batchIndex, Fn<void()> finish) {
@@ -829,13 +829,13 @@ void Histories::deleteMessages(
 			if (const auto channel = history->peer->asChannel()) {
 				return session().api().request(MTPchannels_DeleteMessages(
 					channel->inputChannel(),
-																		  MTP_vector<MTPint>(batchIds)
+					MTP_vector<MTPint>(batchIds)
 				)).done(done).fail(finishBatch).send();
 			} else {
 				using Flag = MTPmessages_DeleteMessages::Flag;
 				return session().api().request(MTPmessages_DeleteMessages(
 					MTP_flags(revoke ? Flag::f_revoke : Flag(0)),
-																		  MTP_vector<MTPint>(batchIds)
+					MTP_vector<MTPint>(batchIds)
 				)).done(done).fail(finishBatch).send();
 			}
 		});

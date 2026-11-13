@@ -52,7 +52,7 @@ rpl::producer<TextWithEntities> Text2() {
 		rpl::single(tr::link(
 			"GitHub",
 			"https://github.com/kukuruzka165/materialgram")),
-			tr::marked);
+		tr::marked);
 }
 
 rpl::producer<TextWithEntities> Text3() {

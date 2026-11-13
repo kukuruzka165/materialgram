@@ -225,7 +225,6 @@ defaultCalendarSizes: CalendarSizes {
 	cellInner: 34px;
 	padding: margins(14px, 0px, 14px, 0px);
 }
-
 CalendarColors {
 	dayTextColor: color;
 	dayTextGrayedOutColor: color;
