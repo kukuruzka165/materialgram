@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_add_poll_option.h"
 #include "history/view/history_view_element_overlay.h"
 #include "history/view/history_view_emoji_interactions.h"
+#include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_top_peers_selector.h"
 #include "history/history_inner_widget_accessibility.h"
 #include "history/history_item_components.h"
@@ -404,7 +405,22 @@ HistoryInner::HistoryInner(
 	[=] { mouseActionUpdate(QCursor::pos()); setCursor(_cursor); },
 	[=] { return window()->isActiveWindow(); })
 , _scrollDateCheck([this] { scrollDateCheck(); })
-, _scrollDateHideTimer([this] { scrollDateHideByTimer(); }) {
+, _scrollDateHideTimer([this] { scrollDateHideByTimer(); })
+, _mediaPreloader(std::make_unique<HistoryView::MediaPreloader>([=](
+		const auto &visit) {
+	for (const auto history : { _migrated, _history.get() }) {
+		if (!history) {
+			continue;
+		}
+		for (const auto &block : history->blocks) {
+			for (const auto &view : block->messages) {
+				if (const auto top = itemTop(view.get()); top >= 0) {
+					visit(view.get(), top);
+				}
+			}
+		}
+	}
+})) {
 	_history->delegateMixin()->setCurrent(this);
 	if (_migrated) {
 		_migrated->delegateMixin()->setCurrent(this);
@@ -4634,6 +4650,7 @@ void HistoryInner::visibleAreaUpdated(int top, int bottom) {
 	_emojiInteractions->visibleAreaUpdated(
 		_visibleAreaTop,
 		_visibleAreaBottom);
+	_mediaPreloader->visibleAreaUpdated(_visibleAreaTop, _visibleAreaBottom);
 
 	if (_overlayHost) {
 		_overlayHost->updatePosition();

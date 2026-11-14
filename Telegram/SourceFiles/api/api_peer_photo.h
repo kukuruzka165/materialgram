@@ -132,6 +132,11 @@ private:
 		Media::Encode::TranscodeResult &&result);
 	void checkVideoUploadDone(FullMsgId msgId);
 	void clearUpload(FullMsgId msgId);
+	void requestGameePhoto(
+		not_null<UserData*> user,
+		std::vector<PhotoId> photoIds,
+		int fullCount,
+		int attempt);
 
 	[[nodiscard]] EmojiListData &emojiList(EmojiListType type);
 	[[nodiscard]] const EmojiListData &emojiList(EmojiListType type) const;

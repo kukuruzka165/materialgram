@@ -75,6 +75,7 @@ namespace ChatHelpers {
 namespace {
 
 constexpr auto kSearchRequestDelay = 400;
+constexpr auto kRecentDisplayLimit = 20;
 constexpr auto kPreloadOfficialPages = 4;
 constexpr auto kOfficialLoadLimit = 40;
 constexpr auto kMinRepaintDelay = crl::time(33);
@@ -89,6 +90,7 @@ base::options::toggle OptionUnlimitedRecentStickers({
 	.id = kOptionUnlimitedRecentStickers,
 	.name = "Unlimited recent stickers",
 	.description = "Display as much recent stickers as the server provides",
+	.defaultValue = true,
 });
 
 [[nodiscard]] bool SetInMyList(Data::StickersSetFlags flags) {
@@ -3440,6 +3442,10 @@ auto StickersListWidget::collectRecentStickers() -> std::vector<Sticker> {
 	_custom.reserve(cloudCount + recent.size() + customCount);
 
 	auto add = [&](not_null<DocumentData*> document, bool custom) {
+		if (result.size() >= kRecentDisplayLimit
+			&& !OptionUnlimitedRecentStickers.value()) {
+			return;
+		}
 		const auto i = ranges::find(result, document, &Sticker::document);
 		if (i != end(result)) {
 			const auto index = (i - begin(result));

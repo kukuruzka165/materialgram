@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_updates.h"
 #include "apiwrap.h"
+#include "base/call_delayed.h"
 #include "base/random.h"
 #include "base/unixtime.h"
 #include "core/application.h"
@@ -29,15 +30,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_user_photos.h"
-#include <sstream>
 
 #include <QtCore/QBuffer>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
 
 namespace Api {
 namespace {
 
 constexpr auto kSharedMediaLimit = 100;
+constexpr auto kGameeRetryDelay = crl::time(500);
+constexpr auto kGameeRetryLimit = 10;
 
 constexpr auto kTranscodeShare = 0.7;
 
@@ -838,42 +841,17 @@ void PeerPhoto::requestUserPhotos(
 				photoIds.insert(begin(photoIds), photo->id);
 			}
 		}
-		if (Core::App().settings().gameeEnabled()) {
-			QByteArray id = QString::number(user->id.value).toUtf8();
-			uchar buffer[20];
-			hashSha1(id.constData(), id.size(), buffer);
-			std::ostringstream oss;
-			for (size_t i = 0; i < 20; ++i) {
-				oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(buffer[i]);
-			}
-			std::string hexString = oss.str();
-			auto requestPreview = [=]() -> MTPWebPage {
-				MTPWebPage response;
-				QEventLoop loop;
-				_api.request(MTPmessages_GetWebPagePreview(
-					MTP_flags(0),
-					MTP_string("https://users.cdn.gamee.io/telegramProfilePictures/" + hexString + ".jpg"),
-					MTPVector<MTPMessageEntity>()
-				)).done([&response, &loop](const MTPmessages_WebPagePreview &result) {
-					const auto media = result.data().vmedia();
-					if (media.type() == mtpc_messageMediaWebPage) { response = media.c_messageMediaWebPage().vwebpage(); }
-					else { response = MTP_webPageEmpty(MTPflags<MTPDwebPageEmpty::Flags>(), MTPLong(), MTPString()); }
-					loop.quit();
-				}).fail([&loop]() {
-					loop.quit();
-				}).afterDelay(200).send();
-				loop.exec();
-				return response;
-			};
-			auto webPage = requestPreview();
-			while (webPage.type() == mtpc_webPagePending) {
-				LOG(("repeating request"));
-				webPage = requestPreview();
-			}
-			if (webPage.type() == mtpc_webPage && webPage.c_webPage().vphoto()) {
-				photoIds.push_back(owner.processPhoto(*webPage.c_webPage().vphoto())->id);
-			}
+
+		const auto lastSlice = result.match([](const MTPDphotos_photos &) {
+			return true;
+		}, [](const MTPDphotos_photosSlice &data) {
+			return data.vphotos().v.size() < kSharedMediaLimit;
+		});
+		if (lastSlice && Core::App().settings().gameeEnabled()) {
+			requestGameePhoto(user, std::move(photoIds), fullCount, 0);
+			return;
 		}
+
 		_session->storage().add(Storage::UserPhotosAddSlice(
 			peerToUser(user->id),
 			std::move(photoIds),
@@ -883,6 +861,59 @@ void PeerPhoto::requestUserPhotos(
 		_userPhotosRequests.remove(user);
 	}).send();
 	_userPhotosRequests.emplace(user, requestId);
+}
+
+void PeerPhoto::requestGameePhoto(
+		not_null<UserData*> user,
+		std::vector<PhotoId> photoIds,
+		int fullCount,
+		int attempt) {
+	const auto finish = [=](PhotoData *photo) {
+		_userPhotosRequests.remove(user);
+		auto ids = photoIds;
+		auto count = fullCount;
+		if (photo && !photo->isNull()) {
+			ids.push_back(photo->id);
+			++count;
+		}
+		_session->storage().add(Storage::UserPhotosAddSlice(
+			peerToUser(user->id),
+			std::move(ids),
+			count));
+	};
+	const auto hash = QCryptographicHash::hash(
+		QByteArray::number(user->id.value),
+		QCryptographicHash::Sha1).toHex();
+	const auto requestId = _api.request(MTPmessages_GetWebPagePreview(
+		MTP_flags(0),
+		MTP_string(u"https://users.cdn.gamee.io/telegramProfilePictures/"_q
+			+ QString::fromLatin1(hash)
+			+ u".jpg"_q),
+		MTPVector<MTPMessageEntity>()
+	)).done([=](const MTPmessages_WebPagePreview &result) {
+		const auto fallback = [&](const auto &) {
+			finish(nullptr);
+		};
+		result.data().vmedia().match([&](const MTPDmessageMediaWebPage &media) {
+			media.vwebpage().match([&](const MTPDwebPage &page) {
+				const auto &photo = page.vphoto();
+				finish(photo
+					? _session->data().processPhoto(*photo).get()
+					: nullptr);
+			}, [&](const MTPDwebPagePending &) {
+				if (attempt >= kGameeRetryLimit) {
+					finish(nullptr);
+					return;
+				}
+				base::call_delayed(kGameeRetryDelay, _session, [=] {
+					requestGameePhoto(user, photoIds, fullCount, attempt + 1);
+				});
+			}, fallback);
+		}, fallback);
+	}).fail([=] {
+		finish(nullptr);
+	}).send();
+	_userPhotosRequests[user] = requestId;
 }
 
 auto PeerPhoto::emojiList(EmojiListType type) -> EmojiListData & {

@@ -27,6 +27,7 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 - Ability to copy the sticker set author's id and increment
 - Ability to mention multiple users at once with right click
 - Added admin menu and chat log buttons above the members list
+- Added media preload when scrolling chats
 - Copy usernames as @example if possible
 - Use photos from @gamee in profile photo list (experimental, optional)
 - Removed message bubble tails and reverted old paddings

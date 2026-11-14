@@ -100,6 +100,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_click_handler.h"
 #include "data/data_message_reactions.h"
 #include "data/data_peer_values.h"
+#include "data/data_cloud_file.h"
+#include "data/data_document_media.h"
+#include "data/data_emoji_statuses.h"
+#include "data/data_photo_media.h"
+#include "data/data_web_page.h"
+#include "data/stickers/data_custom_emoji.h"
+#include "chat_helpers/stickers_dice_pack.h"
 #include "styles/style_chat.h"
 #include "styles/style_window.h" // columnMaximalWidthLeft
 
@@ -572,7 +579,12 @@ ListWidget::ListWidget(
 		[=](int d) { _delegate->listScrollTo(_visibleTop + d, false); },
 		[=](const QCursor &cursor) { setCursor(cursor); },
 		[=] { mouseActionUpdate(QCursor::pos()); setCursor(_cursor); },
-		[=] { return window()->isActiveWindow(); }) {
+		[=] { return window()->isActiveWindow(); })
+, _mediaPreloader([=](const auto &visit) {
+	for (const auto &view : _items) {
+		visit(view, itemTop(view));
+	}
+}) {
 	setAttribute(Qt::WA_AcceptTouchEvents);
 	setMouseTracking(true);
 	setAccessibleName(tr::lng_sr_message_list(tr::now));
@@ -1514,6 +1526,7 @@ void ListWidget::visibleTopBottomUpdated(
 	_applyUpdatedScrollState.call();
 
 	_emojiInteractions->visibleAreaUpdated(_visibleTop, _visibleBottom);
+	_mediaPreloader.visibleAreaUpdated(_visibleTop, _visibleBottom);
 	if (_overlayHost) {
 		_overlayHost->updatePosition();
 	}
@@ -6795,6 +6808,254 @@ CopyRestrictionType SelectRestrictionTypeFor(
 			: CopyRestrictionTypeFor(peer);
 	}
 	return CopyRestrictionTypeFor(peer);
+}
+
+namespace {
+
+constexpr auto kPreloadScreens = 2;
+constexpr auto kPreloadThrottle = crl::time(150);
+constexpr auto kSlotMachineParts = 21;
+constexpr auto kMaxRecentUserpics = 3;
+
+template <typename Visit>
+void EnumerateRichMedia(
+		const std::vector<Iv::RichPage::Block> &blocks,
+		Visit &&visit) {
+	for (const auto &block : blocks) {
+		visit(block.photo, block.document);
+		for (const auto &media : block.mediaItems) {
+			visit(media.photo, media.document);
+		}
+		EnumerateRichMedia(block.blocks, visit);
+		for (const auto &item : block.listItems) {
+			EnumerateRichMedia(item.blocks, visit);
+		}
+	}
+}
+
+template <typename Visit>
+void EnumerateMedia(not_null<Element*> view, Visit &&visit) {
+	const auto item = view->data();
+	const auto media = item->media();
+	const auto page = media ? media->webpage() : nullptr;
+	if (const auto shown = view->media()) {
+		const auto photo = shown->getPhoto();
+		const auto document = shown->getDocument();
+		visit(photo, document);
+		if (page && (photo || document)) {
+			for (const auto &entry : page->collage.items) {
+				v::match(entry, [&](PhotoData *photo) {
+					visit(photo, nullptr);
+				}, [&](DocumentData *document) {
+					visit(nullptr, document);
+				});
+			}
+		}
+	}
+	if (media && !page) {
+		visit(media->photo(), media->document());
+		visit(media->videoCover(), nullptr);
+		if (const auto invoice = media->invoice()) {
+			for (const auto &extended : invoice->extendedMedia) {
+				visit(extended->photo(), extended->document());
+			}
+		}
+		if (const auto dice = dynamic_cast<Data::MediaDice*>(media)) {
+			auto &packs = item->history()->session().diceStickersPacks();
+			const auto slot = Stickers::DicePacks::IsSlot(dice->emoji());
+			for (auto i = 0; i != (slot ? kSlotMachineParts : 1); ++i) {
+				visit(nullptr, packs.lookup(dice->emoji(), i));
+			}
+			if (!slot && dice->value()) {
+				visit(nullptr, packs.lookup(dice->emoji(), dice->value()));
+			}
+		}
+	}
+	if (const auto rich = item->richPage()) {
+		EnumerateRichMedia(rich->blocks, visit);
+	}
+}
+
+[[nodiscard]] bool DicePending(not_null<HistoryItem*> item) {
+	const auto dice = dynamic_cast<Data::MediaDice*>(item->media());
+	return dice && !item->history()->session().diceStickersPacks().lookup(
+		dice->emoji(),
+		0);
+}
+
+[[nodiscard]] bool Preloadable(not_null<DocumentData*> document) {
+	return document->saveToCache()
+		&& !document->isAnimation()
+		&& !document->isVoiceMessage();
+}
+
+[[nodiscard]] bool MediaLoading(not_null<Element*> view) {
+	auto result = false;
+	EnumerateMedia(view, [&](PhotoData *photo, DocumentData *document) {
+		result = result
+			|| (photo && photo->loading())
+			|| (document && Preloadable(document) && document->loading());
+	});
+	return result;
+}
+
+void PreloadMedia(not_null<Element*> view) {
+	const auto item = view->data();
+	const auto origin = Data::FileOrigin(item->fullId());
+	EnumerateMedia(view, [&](PhotoData *photo, DocumentData *document) {
+		if (photo && !photo->isNull()) {
+			photo->createMediaView()->automaticLoad(origin, item);
+		}
+		if (document) {
+			document->loadThumbnail(origin);
+			if (Preloadable(document)) {
+				document->createMediaView()->automaticLoad(
+					document->sticker() ? document->stickerSetOrigin() : origin,
+					item);
+			}
+		}
+	});
+	if (const auto location = item->media()
+			? item->media()->location()
+			: nullptr) {
+		location->load(&item->history()->session(), origin);
+	}
+}
+
+void PreloadUserpics(not_null<Element*> view) {
+	const auto item = view->data();
+	if (const auto from = view->hasFromPhoto()
+			? view->displayFrom()
+			: nullptr) {
+		from->loadUserpic();
+	}
+	if (const auto views = item->Get<HistoryMessageViews>()) {
+		const auto owner = &item->history()->owner();
+		for (const auto &id : views->recentRepliers) {
+			owner->peer(id)->loadUserpic();
+		}
+	}
+	const auto reacted = ranges::accumulate(
+		item->reactions(),
+		0,
+		ranges::plus(),
+		&Data::MessageReaction::count);
+	if (reacted <= kMaxRecentUserpics) {
+		for (const auto &[id, list] : item->recentReactions()) {
+			for (const auto &reaction : list) {
+				reaction.peer->loadUserpic();
+			}
+		}
+	}
+	if (const auto poll = item->media() ? item->media()->poll() : nullptr) {
+		for (const auto &peer : poll->recentVoters) {
+			peer->loadUserpic();
+		}
+		for (const auto &answer : poll->answers) {
+			for (const auto &peer : answer.recentVoters) {
+				peer->loadUserpic();
+			}
+		}
+	}
+}
+
+[[nodiscard]] std::vector<DocumentId> CollectEmoji(
+		not_null<Element*> view) {
+	const auto item = view->data();
+	auto result = std::vector<DocumentId>();
+	const auto background = [&](PeerData *peer) {
+		if (peer) {
+			result.push_back(peer->backgroundEmojiId());
+			if (const auto &collectible = peer->colorCollectible()) {
+				result.push_back(collectible->giftEmojiId);
+			}
+		}
+	};
+	if (const auto from = view->displayFromName()
+			? view->displayFrom()
+			: nullptr) {
+		const auto status = from->emojiStatusId();
+		result.push_back(status.collectible
+			? status.collectible->documentId
+			: status.documentId);
+	}
+	if (const auto reply = item->Get<HistoryMessageReply>()) {
+		if (const auto replied = reply->resolvedMessage.get()) {
+			background(replied->contentColorsFrom());
+		}
+	}
+	if (item->media() && item->media()->webpage()) {
+		background(item->contentColorsFrom());
+	}
+	for (const auto &reaction : item->reactions()) {
+		result.push_back(reaction.id.custom());
+	}
+	for (const auto &entity : item->originalText().entities) {
+		if (entity.type() == EntityType::CustomEmoji) {
+			result.push_back(Data::ParseCustomEmojiData(entity.data()));
+		}
+	}
+	return result;
+}
+
+} // namespace
+
+MediaPreloader::MediaPreloader(Enumerate enumerate)
+: _enumerate(std::move(enumerate))
+, _timer([=] { preload(); }) {
+}
+
+void MediaPreloader::visibleAreaUpdated(int top, int bottom) {
+	_visibleTop = top;
+	_visibleBottom = bottom;
+	if (!_timer.isActive()) {
+		_timer.callOnce(kPreloadThrottle);
+	}
+}
+
+void MediaPreloader::preload() {
+	using Candidate = std::pair<int, not_null<Element*>>;
+	const auto margin = kPreloadScreens * (_visibleBottom - _visibleTop);
+	auto queue = std::vector<Candidate>();
+	auto visibleLoading = false;
+	_enumerate([&](not_null<Element*> view, int top) {
+		const auto distance = std::max({
+			_visibleTop - (top + view->height()),
+			top - _visibleBottom,
+			0,
+		});
+		if (!distance && !visibleLoading) {
+			visibleLoading = MediaLoading(view);
+		}
+		const auto id = view->data()->fullId();
+		if (distance < margin && !_preloaded.contains(id)) {
+			queue.emplace_back(distance, view);
+		}
+	});
+	if (visibleLoading) {
+		_timer.callOnce(kPreloadThrottle);
+		return;
+	}
+	ranges::sort(queue, ranges::greater(), &Candidate::first);
+	for (const auto &[distance, view] : queue) {
+		PreloadMedia(view);
+		PreloadUserpics(view);
+		auto &manager = view->history()->owner().customEmojiManager();
+		for (const auto id : CollectEmoji(view)) {
+			if (!id || !_emoji.emplace(id).second) {
+				continue;
+			}
+			manager.resolve(id) | rpl::take(1) | rpl::on_next_error([](
+					not_null<DocumentData*> document) {
+				document->createMediaView()->automaticLoad(
+					document->stickerSetOrigin(),
+					nullptr);
+			}, [] {}, _lifetime);
+		}
+		if (!DicePending(view->data())) {
+			_preloaded.emplace(view->data()->fullId());
+		}
+	}
 }
 
 } // namespace HistoryView
