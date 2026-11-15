@@ -4,5 +4,6 @@
     <file alias="emoji/set1_preview.webp">../emoji/set1_preview.webp</file>
     <file alias="emoji/set2_preview.webp">../emoji/set2_preview.webp</file>
     <file alias="emoji/set3_preview.webp">../emoji/set3_preview.webp</file>
+    <file alias="emoji/set4_preview.webp">../emoji/set4_preview.webp</file>
   </qresource>
 </RCC>
