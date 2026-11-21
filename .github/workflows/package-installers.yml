@@ -1,0 +1,422 @@
+name: Package Release Installers
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to package (e.g. v7.3.1.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # ==========================================
+  # ENSURE RELEASE EXISTS IN REPOSITORY
+  # ==========================================
+  ensure-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      tag_with_v: ${{ steps.meta.outputs.tag_with_v }}
+      clean_version: ${{ steps.meta.outputs.clean_version }}
+      msi_version: ${{ steps.meta.outputs.msi_version }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Resolve tag and initialize release
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          TAG=$(echo "$TAG" | xargs)
+          case "$TAG" in
+            v*) TAG_WITH_V="$TAG" ;;
+            *)  TAG_WITH_V="v$TAG" ;;
+          esac
+          CLEAN_VERSION="${TAG_WITH_V#v}"
+
+          # Extract numeric version for MSI
+          BASE_VER=$(echo "$CLEAN_VERSION" | cut -d'-' -f1 | cut -d'+' -f1)
+          IFS='.' read -r -a PARTS <<< "$BASE_VER"
+          while [ ${#PARTS[@]} -lt 3 ]; do
+            PARTS+=("0")
+          done
+          if [ ${#PARTS[@]} -gt 4 ]; then
+            PARTS=("${PARTS[@]:0:4}")
+          fi
+          MSI_VERSION=$(IFS='.'; echo "${PARTS[*]}")
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "tag_with_v=$TAG_WITH_V" >> $GITHUB_OUTPUT
+          echo "clean_version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+          echo "msi_version=$MSI_VERSION" >> $GITHUB_OUTPUT
+
+          echo "Target tag: $TAG ($TAG_WITH_V)"
+          echo "MSI version: $MSI_VERSION"
+
+          # Check if release exists in current fork; if not, create it
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG does not exist in this repository. Creating it..."
+            gh release create "$TAG" --title "$TAG" --notes "Release $TAG" --target main || true
+          else
+            echo "Release $TAG already exists in this repository."
+          fi
+
+  # ==========================================
+  # WINDOWS: Inno Setup (.exe) and WiX v4 (.msi)
+  # ==========================================
+  package-windows:
+    name: Windows Installers (.exe & .msi)
+    needs: [ensure-release]
+    runs-on: windows-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.ensure-release.outputs.tag }}
+      TAG_WITH_V: ${{ needs.ensure-release.outputs.tag_with_v }}
+      CLEAN_VERSION: ${{ needs.ensure-release.outputs.clean_version }}
+      MSI_VERSION: ${{ needs.ensure-release.outputs.msi_version }}
+      SETUP_EXE_NAME: materialgram-${{ needs.ensure-release.outputs.tag_with_v }}-x64-setup.exe
+      MSI_NAME: materialgram-${{ needs.ensure-release.outputs.tag_with_v }}-x64.msi
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Inno Setup & WiX v4
+        run: |
+          choco install innosetup --no-progress --yes
+          dotnet tool install --global wix --version 4.0.6
+          wix extension add WixToolset.UI.wixext/4.0.6
+
+      - name: Download Windows zip (local with upstream fallback)
+        run: |
+          New-Item -ItemType Directory -Path download -Force | Out-Null
+
+          # 1. Try local repository
+          Write-Host "Attempting download of win64_materialgram_*.zip from current repo..."
+          & gh release download $env:TAG --pattern "win64_materialgram_*.zip" --dir download 2>$null
+
+          $dl = Get-ChildItem -Path download -Filter "win64_materialgram_*.zip" | Select-Object -First 1
+
+          # 2. Upstream fallback if not in fork
+          if (-not $dl) {
+            Write-Host "Not found in fork. Downloading from upstream (kukuruzka165/materialgram)..."
+            & gh release download $env:TAG --repo kukuruzka165/materialgram --pattern "win64_materialgram_*.zip" --dir download 2>$null
+            $dl = Get-ChildItem -Path download -Filter "win64_materialgram_*.zip" | Select-Object -First 1
+          }
+
+          if ($dl) {
+            Write-Host "Obtained: $($dl.Name) ($($dl.Length) bytes)"
+            "HAS_WIN=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            # Ensure base archive is also available in this repository's release
+            & gh release upload $env:TAG $dl.FullName --clobber 2>$null
+          } else {
+            Write-Warning "Could not find win64_materialgram_*.zip in current repo or upstream."
+            "HAS_WIN=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Extract zip to staging folder
+        if: env.HAS_WIN == 'true'
+        run: |
+          New-Item -ItemType Directory -Path staging, output -Force | Out-Null
+          $zip = Get-ChildItem -Path download -Filter "win64_materialgram_*.zip" | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+
+          if (-not (Test-Path "staging\materialgram.exe")) {
+            $found = Get-ChildItem -Path staging -Filter "materialgram.exe" -Recurse | Select-Object -First 1
+            if ($found) {
+              Get-ChildItem -Path $found.Directory.FullName | Move-Item -Destination "staging" -Force
+            } else {
+              Write-Error "materialgram.exe not found in archive."
+              exit 1
+            }
+          }
+
+      - name: Build Inno Setup installer (.exe)
+        if: env.HAS_WIN == 'true'
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $setupExeBase = "materialgram-$env:TAG_WITH_V-x64-setup"
+          $stagingFull = (Resolve-Path "staging").Path
+          $outputFull = (Resolve-Path "output").Path
+
+          & $iscc `
+            "/dMyAppVersion=$env:CLEAN_VERSION" `
+            "/dStagingDir=$stagingFull" `
+            "/dOutputDir=$outputFull" `
+            "/dOutputBaseFilename=$setupExeBase" `
+            "packaging\setup.iss"
+
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "output\$env:SETUP_EXE_NAME")) {
+            Write-Error "Inno Setup compilation failed."
+            exit 1
+          }
+
+      - name: Build WiX Toolset v4 installer (.msi)
+        if: env.HAS_WIN == 'true'
+        run: |
+          powershell -ExecutionPolicy Bypass -File packaging/generate-wix-components.ps1 `
+            -StagingDir staging `
+            -OutputFile packaging/staging-files.wxs
+
+          $outputMsi = "output\$env:MSI_NAME"
+          wix build packaging/installer.wxs packaging/staging-files.wxs `
+            -ext WixToolset.UI.wixext `
+            -d Version="$env:MSI_VERSION" `
+            -arch x64 `
+            -out $outputMsi
+
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $outputMsi)) {
+            Write-Error "WiX MSI compilation failed."
+            exit 1
+          }
+
+      - name: Optional code signing
+        if: env.HAS_WIN == 'true'
+        env:
+          SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:SIGNING_CERT_BASE64)) {
+            Write-Host "Signing certificate secret detected. Preparing to sign binaries..."
+            $certBytes = [Convert]::FromBase64String($env:SIGNING_CERT_BASE64)
+            $certPath = Join-Path $env:RUNNER_TEMP "signing_cert.pfx"
+            [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+
+            $signtool = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1)?.FullName
+            if (-not $signtool) { $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue)?.Source }
+
+            if ($signtool -and (Test-Path $signtool)) {
+              $targets = @("output\$env:SETUP_EXE_NAME", "output\$env:MSI_NAME")
+              foreach ($t in $targets) {
+                Write-Host "Signing $t..."
+                $args = @("sign", "/f", $certPath, "/fd", "SHA256", "/tr", "http://timestamp.digicert.com", "/td", "SHA256")
+                if (-not [string]::IsNullOrWhiteSpace($env:SIGNING_CERT_PASSWORD)) {
+                  $args += @("/p", $env:SIGNING_CERT_PASSWORD)
+                }
+                $args += (Resolve-Path $t).Path
+                & $signtool $args
+              }
+            }
+            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "::notice::Code signing secrets not provided; skipping code signing. Windows SmartScreen may warn on unsigned binaries."
+          }
+
+      - name: Upload Windows installer assets
+        if: env.HAS_WIN == 'true'
+        run: |
+          gh release upload $env:TAG `
+            "output\$env:SETUP_EXE_NAME" `
+            "output\$env:MSI_NAME" `
+            --clobber
+
+  # ==========================================
+  # MACOS: Apple Disk Image (.dmg)
+  # ==========================================
+  package-macos:
+    name: macOS Disk Image (.dmg)
+    needs: [ensure-release]
+    runs-on: macos-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.ensure-release.outputs.tag }}
+      TAG_WITH_V: ${{ needs.ensure-release.outputs.tag_with_v }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download macOS release zip (local with upstream fallback)
+        run: |
+          mkdir -p download
+          gh release download "$TAG" --pattern "applesilicon_materialgram_*.zip" --dir download 2>/dev/null || true
+          ZIP=$(find download -name "applesilicon_materialgram_*.zip" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "Not found in fork. Downloading from upstream (kukuruzka165/materialgram)..."
+            gh release download "$TAG" --repo kukuruzka165/materialgram --pattern "applesilicon_materialgram_*.zip" --dir download 2>/dev/null || true
+            ZIP=$(find download -name "applesilicon_materialgram_*.zip" | head -n 1)
+          fi
+
+          if [ -n "$ZIP" ]; then
+            echo "Obtained: $ZIP"
+            echo "HAS_MAC=true" >> $GITHUB_ENV
+            gh release upload "$TAG" "$ZIP" --clobber 2>/dev/null || true
+          else
+            echo "Could not find applesilicon_materialgram_*.zip."
+            echo "HAS_MAC=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create .dmg installer
+        if: env.HAS_MAC == 'true'
+        run: |
+          mkdir -p staging dmg_root output
+          ZIP=$(find download -name "applesilicon_materialgram_*.zip" | head -n 1)
+          unzip -q "$ZIP" -d staging/
+
+          APP=$(find staging -name "materialgram.app" -type d | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "materialgram.app not found in zip."
+            exit 1
+          fi
+
+          echo "Found application bundle: $APP"
+          cp -R "$APP" dmg_root/
+          ln -s /Applications dmg_root/Applications
+
+          DMG_NAME="materialgram-${TAG_WITH_V}-macos-arm64.dmg"
+          hdiutil create -volname "Materialgram" -srcfolder dmg_root -ov -format UDZO "output/$DMG_NAME"
+          echo "Created output/$DMG_NAME"
+          echo "DMG_NAME=$DMG_NAME" >> $GITHUB_ENV
+
+      - name: Upload macOS dmg to release
+        if: env.HAS_MAC == 'true'
+        run: |
+          gh release upload "$TAG" "output/$DMG_NAME" --clobber
+
+  # ==========================================
+  # LINUX: AppImage & Debian package (.deb)
+  # ==========================================
+  package-linux:
+    name: Linux Packages (.AppImage & .deb)
+    needs: [ensure-release]
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.ensure-release.outputs.tag }}
+      TAG_WITH_V: ${{ needs.ensure-release.outputs.tag_with_v }}
+      CLEAN_VERSION: ${{ needs.ensure-release.outputs.clean_version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download Linux release archive (local with upstream fallback)
+        run: |
+          mkdir -p download
+          gh release download "$TAG" --pattern "materialgram-*.tar.zst" --dir download 2>/dev/null || true
+          TAR=$(find download -name "materialgram-*.tar.zst" | head -n 1)
+
+          if [ -z "$TAR" ]; then
+            echo "Not found in fork. Downloading from upstream (kukuruzka165/materialgram)..."
+            gh release download "$TAG" --repo kukuruzka165/materialgram --pattern "materialgram-*.tar.zst" --dir download 2>/dev/null || true
+            TAR=$(find download -name "materialgram-*.tar.zst" | head -n 1)
+          fi
+
+          if [ -n "$TAR" ]; then
+            echo "Obtained: $TAR"
+            echo "HAS_LINUX=true" >> $GITHUB_ENV
+            gh release upload "$TAG" "$TAR" --clobber 2>/dev/null || true
+          else
+            echo "Could not find materialgram-*.tar.zst."
+            echo "HAS_LINUX=false" >> $GITHUB_ENV
+          fi
+
+      - name: Build Debian (.deb) package
+        if: env.HAS_LINUX == 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y zstd
+          mkdir -p staging deb_root/DEBIAN deb_root/usr output
+          TAR=$(find download -name "materialgram-*.tar.zst" | head -n 1)
+          tar --zstd -xvf "$TAR" -C staging/
+
+          if [ -d "staging/usr" ]; then
+            cp -r staging/usr/* deb_root/usr/
+          fi
+
+          printf "%s\n" \
+            "Package: materialgram" \
+            "Version: ${CLEAN_VERSION}" \
+            "Section: net" \
+            "Priority: optional" \
+            "Architecture: amd64" \
+            "Maintainer: Materialgram Contributors" \
+            "Description: Telegram Desktop fork with Material Design and enhancements" \
+            > deb_root/DEBIAN/control
+
+          DEB_NAME="materialgram_${TAG_WITH_V}_amd64.deb"
+          dpkg-deb --build deb_root "output/$DEB_NAME"
+          echo "Created output/$DEB_NAME"
+          echo "DEB_NAME=$DEB_NAME" >> $GITHUB_ENV
+
+      - name: Build AppImage (.AppImage)
+        if: env.HAS_LINUX == 'true'
+        run: |
+          mkdir -p appdir/usr
+          if [ -d "staging/usr" ]; then
+            cp -r staging/usr/* appdir/usr/
+          fi
+
+          DESKTOP=$(find appdir -name "*.desktop" | head -n 1)
+          if [ -n "$DESKTOP" ]; then
+            cp "$DESKTOP" appdir/materialgram.desktop
+          fi
+
+          PNG_ICON="Telegram/Resources/art/icon256.png"
+          if [ -f "$PNG_ICON" ]; then
+            cp "$PNG_ICON" appdir/materialgram.png
+          fi
+
+          printf "%s\n" \
+            "#!/bin/sh" \
+            "HERE=\"\$(dirname \"\$(readlink -f \"\${0}\")\")\"" \
+            "exec \"\${HERE}/usr/bin/materialgram\" \"\$@\"" \
+            > appdir/AppRun
+          chmod +x appdir/AppRun
+
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          sed -i 's|AI\x02|\x00\x00\x00|' appimagetool || true
+
+          APPIMAGE_NAME="materialgram-${TAG_WITH_V}-x86_64.AppImage"
+          ./appimagetool --appimage-extract-and-run appdir "output/$APPIMAGE_NAME" || true
+
+      - name: Upload Linux packages to release
+        if: env.HAS_LINUX == 'true'
+        run: |
+          gh release upload "$TAG" output/* --clobber
+
+  # ==========================================
+  # CHECKSUMS: Update SHA256SUMS.txt
+  # ==========================================
+  update-checksums:
+    name: Generate & Upload SHA256SUMS.txt
+    runs-on: ubuntu-latest
+    needs: [ensure-release, package-windows, package-macos, package-linux]
+    if: always()
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.ensure-release.outputs.tag }}
+
+    steps:
+      - name: Download all release assets and compute checksums
+        run: |
+          mkdir -p all_assets
+          gh release download "$TAG" --dir all_assets || true
+          cd all_assets
+          rm -f SHA256SUMS.txt
+          if [ $(ls -1 2>/dev/null | wc -l) -gt 0 ]; then
+            sha256sum * > SHA256SUMS.txt
+            cat SHA256SUMS.txt
+            gh release upload "$TAG" SHA256SUMS.txt --clobber
+          else
+            echo "No assets in release to checksum."
+          fi

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="Materialgram"
+           Manufacturer="Materialgram"
+           Version="$(var.Version)"
+           UpgradeCode="46C7E6DE-7B7B-4B6A-B6A0-1D1A2E3D4F5E"
+           Scope="perMachine">
+    <SummaryInformation Description="Materialgram Desktop Installer" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Materialgram is already installed." AllowSameVersionUpgrades="yes" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="packaging/app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/kukuruzka165/materialgram" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/kukuruzka165/materialgram" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Materialgram" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Materialgram" />
+    </StandardDirectory>
+
+    <Component Id="ApplicationShortcut" Guid="7DF12F01-6AE8-4DDF-9DC9-839D325E1FA9" Directory="ApplicationProgramsFolder">
+      <Shortcut Id="AppStartMenuShortcut"
+                Name="Materialgram"
+                Description="Materialgram Desktop"
+                Target="[INSTALLFOLDER]materialgram.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RemoveFolder Id="CleanUpShortCut" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\Materialgram" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="MainFeature" Title="Materialgram">
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+  </Package>
+</Wix>
